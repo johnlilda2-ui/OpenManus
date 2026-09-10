@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OpenManus Operational Console</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24px;background:#f6f7f9;color:#171717}button,input,textarea{font:inherit;padding:9px;border:1px solid #ccc;border-radius:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:280px 1fr;gap:18px}.card{background:white;padding:18px;border-radius:12px;box-shadow:0 1px 4px #0001;margin-bottom:16px}.row{display:flex;gap:8px}.list button{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}.muted{color:#666}.log{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:8px;min-height:120px}.danger{color:#a00}.hidden{display:none}@media(max-width:760px){.grid{grid-template-columns:1fr}}
+body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24px;background:#f6f7f9;color:#171717}button,input,textarea{font:inherit;padding:9px;border:1px solid #ccc;border-radius:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:280px 1fr;gap:18px}.card{background:white;padding:18px;border-radius:12px;box-shadow:0 1px 4px #0001;margin-bottom:16px}.row{display:flex;gap:8px}.list button{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}.muted{color:#666}.log{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:8px;min-height:120px}.hidden{display:none}@media(max-width:760px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <h1>OpenManus Operational Console</h1>
-<p class="muted">Authentication, projects, conversations, tasks and live task events.</p>
+<p class="muted">Users, projects, conversations, durable tasks and live events.</p>
 <div id="auth" class="card">
   <div class="row"><input id="email" placeholder="Email"><input id="password" type="password" placeholder="Password"></div>
   <div class="row" style="margin-top:8px"><button onclick="auth('register')">Register</button><button onclick="auth('login')">Login</button></div>
@@ -31,7 +31,7 @@ body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24p
 <script>
 const state={token:localStorage.getItem('om_token')||'',project:null,conversation:null};
 const $=id=>document.getElementById(id);
-async function api(path,opts={}){opts.headers={...(opts.headers||{}),...(state.token?{Authorization:'Bearer '+state.token}:{})}; if(opts.body&&typeof opts.body!=='string'){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)} const r=await fetch(path,opts); if(!r.ok) throw new Error(await r.text()); return r.json()}
+async function api(path,opts={}){opts.headers={...(opts.headers||{}),...(state.token?{Authorization:'Bearer '+state.token}:{})};if(opts.body&&typeof opts.body!=='string'){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)}const r=await fetch(path,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
 async function auth(kind){try{const data=await api('/v1/auth/'+kind,{method:'POST',body:{email:$('email').value,password:$('password').value}});state.token=data.access_token;localStorage.setItem('om_token',state.token);$('auth').classList.add('hidden');$('app').classList.remove('hidden');await refreshProjects()}catch(e){$('authmsg').textContent=e.message}}
 async function refreshProjects(){const p=await api('/v1/projects');$('projects').innerHTML=p.map(x=>`<button onclick="selectProject('${x.id}','${esc(x.name)}')">${esc(x.name)}</button>`).join('')}
 async function createProject(){const name=$('projectName').value.trim();if(!name)return;const p=await api('/v1/projects',{method:'POST',body:{name}});$('projectName').value='';await refreshProjects();selectProject(p.id,p.name)}
@@ -40,8 +40,8 @@ async function refreshConversations(){if(!state.project)return;const c=await api
 async function createConversation(){if(!state.project)return;const title=$('conversationTitle').value.trim()||'New conversation';const c=await api('/v1/projects/'+state.project+'/conversations',{method:'POST',body:{title}});$('conversationTitle').value='';state.conversation=c.id;await refreshConversations()}
 async function selectConversation(id,title){state.conversation=id;$('activeTitle').textContent=title;await refreshTasks()}
 async function refreshTasks(){if(!state.project)return;const t=await api('/v1/projects/'+state.project+'/tasks');$('tasks').innerHTML=t.map(x=>`<div style="padding:8px 0;border-bottom:1px solid #eee"><b>${esc(x.status)}</b> — ${esc(x.prompt.slice(0,120))} <button onclick="watchTask('${x.id}')">Watch</button></div>`).join('')}
-async function runTask(){if(!state.conversation){await createConversation();}if(!state.conversation)return;const prompt=$('prompt').value.trim();if(!prompt)return;try{const t=await api('/v1/conversations/'+state.conversation+'/tasks',{method:'POST',body:{prompt}});$('prompt').value='';await refreshTasks();watchTask(t.id)}catch(e){$('log').textContent=e.message}}
-function watchTask(id){$('log').textContent='Connecting to task '+id+'...';const es=new EventSource('/v1/tasks/'+id+'/events?token='+encodeURIComponent(state.token));es.onmessage=e=>{ $('log').textContent+="\n"+e.data };es.onerror=()=>{es.close();refreshTasks()}}
+async function runTask(){if(!state.conversation){await createConversation()}if(!state.conversation)return;const prompt=$('prompt').value.trim();if(!prompt)return;try{const t=await api('/v1/conversations/'+state.conversation+'/tasks',{method:'POST',body:{prompt}});$('prompt').value='';await refreshTasks();watchTask(t.id)}catch(e){$('log').textContent=e.message}}
+async function watchTask(id){$('log').textContent='Connecting to task '+id+'...';try{const r=await fetch('/v1/tasks/'+id+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data)$('log').textContent+='\n'+data}}}catch(e){$('log').textContent+='\n'+e.message}finally{await refreshTasks()}}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 if(state.token){$('auth').classList.add('hidden');$('app').classList.remove('hidden');refreshProjects().catch(()=>{localStorage.removeItem('om_token');location.reload()})}
 </script>
