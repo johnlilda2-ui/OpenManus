@@ -12,9 +12,19 @@ class Settings:
     access_token_minutes: int = int(os.getenv("OPENMANUS_ACCESS_TOKEN_MINUTES", "60"))
     queue_name: str = os.getenv("OPENMANUS_QUEUE", "openmanus:tasks")
     workflow_stale_seconds: int = int(os.getenv("OPENMANUS_WORKFLOW_STALE_SECONDS", "900"))
+    auto_create_db: bool = os.getenv("OPENMANUS_AUTO_CREATE_DB", "true").lower() in {"1", "true", "yes"}
+    artifact_root: str = os.getenv("OPENMANUS_ARTIFACT_ROOT", "./platform_data/artifacts")
+    s3_bucket: str = os.getenv("OPENMANUS_S3_BUCKET", "")
+    s3_endpoint_url: str = os.getenv("OPENMANUS_S3_ENDPOINT_URL", "")
+    s3_region: str = os.getenv("AWS_REGION", "")
+    usage_input_rate_per_1k: float = float(os.getenv("OPENMANUS_USAGE_INPUT_RATE", "0.003"))
+    usage_output_rate_per_1k: float = float(os.getenv("OPENMANUS_USAGE_OUTPUT_RATE", "0.015"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip()
-        for origin in os.getenv("OPENMANUS_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+        for origin in os.getenv(
+            "OPENMANUS_CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
         if origin.strip()
     )
 
@@ -23,6 +33,8 @@ class Settings:
             raise RuntimeError("OPENMANUS_JWT_SECRET must be changed in production")
         if self.workflow_stale_seconds < 60:
             raise RuntimeError("OPENMANUS_WORKFLOW_STALE_SECONDS must be at least 60 seconds")
+        if self.usage_input_rate_per_1k < 0 or self.usage_output_rate_per_1k < 0:
+            raise RuntimeError("Usage rates cannot be negative")
 
 
 settings = Settings()
