@@ -6,34 +6,37 @@ Website Builder is a specialized mode of the OpenManus AI Builder for production
 
 The mode is optimized for business and company websites, landing pages and marketing sites, portfolios, blogs and content sites, documentation, marketplaces, and responsive multi-page frontend experiences. It can also add a backend/API when dynamic behavior is required.
 
-## Research-driven design
+## Research-driven design selection
 
-Before implementation, Website Builder classifies the request and researches the public web for **exactly 1 or 2** relevant design/UX references. For a marketplace request, it specifically looks for patterns around discovery, search, categories, filters, listing cards, seller identity, trust signals, and buyer/seller journeys.
+Before full implementation, the Website Builder can run a lightweight design-research task. It classifies the request and researches the public web for **exactly 1 or 2** relevant design/UX references when web search is available. Marketplace requests specifically evaluate discovery, search, categories, filters, listing cards, seller identity, trust signals, and buyer/seller journeys.
 
-The research is stored in `WEBSITE_RESEARCH.md` and `WEBSITE_RESEARCH.json`, then used to inform the site's information architecture and original design system. References are treated as inspiration and benchmarking only. The agent is instructed not to copy proprietary text, images, logos, trademarks, exact layouts, or branded identity. If search is unavailable, the build records that limitation and continues with general design knowledge rather than inventing URLs.
+The research task returns **up to 2 reference design directions plus 1 original OpenManus design direction**. Each option contains a compact visual design board (style, layout, typography and palette), useful extracted patterns, and a source link when it is a reference. The UI presents these options before the full build so the user can choose the direction they want.
 
-The operational workspace shows the selected references and their URLs so the user can see what informed the design.
+Reference options are inspiration and benchmarking only. The agent is instructed not to copy proprietary text, images, logos, trademarks, source code, exact layouts, or branded identity. The original OpenManus option is generated independently from the references. If web search is unavailable, the task records that limitation and does not invent reference URLs.
+
+The user's chosen direction is then appended to the real Website Builder requirements as a design directive. Reference selections remain explicitly marked as inspiration-only, so the final implementation stays original while honoring the user's selected visual direction.
 
 ## Autonomous workflow
 
-Website Builder uses the same durable worker, policy layer, isolated sandbox, artifact store and model router as the general App Builder, with website-specific design and iteration state.
+After the user selects a design direction, Website Builder uses the same durable worker, policy layer, isolated sandbox, artifact store and model router as the general App Builder, with website-specific design and iteration state.
 
-1. Reference research and design inspiration
-2. Website strategy and information architecture
-3. Design system and page/section/asset manifest generation
-4. Content and page system
-5. Visual asset creation and sourcing
-6. Visual frontend implementation
-7. SEO, accessibility and performance hardening
-8. Integration and preview configuration
-9. Run and preview in the isolated sandbox
-10. Automated website testing and repair
-11. Browser visual/UX verification with deterministic visual snapshot baselines
-12. Autonomous website repair
-13. Browser re-verification with visual similarity/diff scoring
-14. Final website security and release review
+1. Selected design direction from pre-build gallery
+2. Reference research and design inspiration during the build
+3. Website strategy and information architecture
+4. Design system and page/section/asset manifest generation
+5. Content and page system
+6. Visual asset creation and sourcing
+7. Visual frontend implementation
+8. SEO, accessibility and performance hardening
+9. Integration and preview configuration
+10. Run and preview in the isolated sandbox
+11. Automated website testing and repair
+12. Browser visual/UX verification with deterministic visual snapshot baselines
+13. Autonomous website repair
+14. Browser re-verification with visual similarity/diff scoring
+15. Final website security and release review
 
-Browser phases fail closed: unavailable browser tooling is reported as failed verification rather than a fabricated pass.
+The research gallery is a pre-build selection step; the durable implementation workflow begins only after a direction is chosen. Browser phases fail closed: unavailable browser tooling is reported as failed verification rather than a fabricated pass.
 
 ## Design system
 
@@ -65,11 +68,11 @@ The dedicated authenticated workspace is available at:
 
 `GET /website-builder`
 
-It displays the live preview, research references, design system, asset manifest, stable sections and per-section **Improve section** actions. During an iteration, the parent website remains the editor's source of truth while the child run streams its progress.
+It displays the live preview, research references, design system, asset manifest, stable sections and per-section **Improve section** actions. The workspace also provides the pre-build design gallery when starting a new site, with selectable reference and original design boards.
 
 ## Marketplace-specific behavior
 
-When someone says something like **“build a marketplace for me”**, the builder is instructed to recognize the marketplace model and research 1–2 suitable public references before designing. It then uses the references to inform an original marketplace experience with patterns such as:
+When someone says something like **“build a marketplace for me”**, the builder is instructed to recognize the marketplace model and research 1–2 suitable public references before designing. It then uses the selected direction and research to inform an original marketplace experience with patterns such as:
 
 - strong discovery and category navigation
 - useful search and filtering
@@ -78,8 +81,6 @@ When someone says something like **“build a marketplace for me”**, the build
 - buyer and seller journeys that do not compete with each other
 - responsive mobile browsing
 - focused calls to action and conversion paths
-
-These patterns align with current marketplace UX research emphasizing the distinct needs of buyers and sellers and the importance of trust, discovery, and filtering. 
 
 ## API
 
@@ -97,6 +98,8 @@ Example request body:
 ```
 
 The response contains the workflow, durable run ID, workspace and `mode: "website"`.
+
+The pre-build gallery uses the existing authenticated task API to research and return `DESIGN_OPTIONS_JSON`. The selected option is then included as a design directive when the real Website Builder run is created.
 
 ## Model routing
 
