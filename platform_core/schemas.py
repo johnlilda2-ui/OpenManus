@@ -227,6 +227,7 @@ class WebsiteExperienceResponse(BaseModel):
     sections: list[WebsiteSectionResponse] = Field(default_factory=list)
     design_system: dict = Field(default_factory=dict)
     assets: list[dict] = Field(default_factory=list)
+    research: dict = Field(default_factory=dict)
     visual_score: float | None = None
 
 
