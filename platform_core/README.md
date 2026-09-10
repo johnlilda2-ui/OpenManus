@@ -1,77 +1,62 @@
-# OpenManus Operational Platform Core
+# OpenManus Operational Platform
 
-This directory adds a persistent control plane around the existing OpenManus agent engine.
+This layer adds a persistent control plane around the existing OpenManus agent engine without replacing the engine.
 
-## Architecture
+## v0.3 capabilities
 
-```text
-Client
-  -> FastAPI API
-  -> JWT authentication and project ownership
-  -> PostgreSQL / SQLite
-  -> Redis queue
-  -> OpenManus worker
-  -> PolicyToolBroker
-  -> Manus engine + tools/MCP/browser
-  -> durable task/workflow events
-  -> SSE
-```
+- JWT authentication with Argon2 password hashing.
+- Persistent projects, conversations, tasks and audit events.
+- Redis-backed workers with database recovery.
+- Project-scoped tool policies.
+- Approval requests for high-risk tool execution.
+- Host execution boundary that blocks Bash, Docker and computer-use tools unless separately isolated.
+- Durable user/project memory and project knowledge records.
+- Durable sequential workflows with persisted step runs and stale-run recovery.
+- Durable artifact storage using a local persistent volume or S3-compatible object storage.
+- Project quotas and token/cost accounting with configurable rates.
+- Vanilla HTML web console at `/`.
+- Alembic schema migrations.
 
-## Capabilities in v0.2
+## Run
 
-- User registration and JWT authentication.
-- Project-scoped tool policies with allow/deny/approval patterns.
-- Persistent conversations and task history.
-- Persistent memory entries with lightweight keyword retrieval.
-- Project knowledge documents with retrieval.
-- Durable sequential workflows with persisted step runs.
-- Workflow recovery after stale worker heartbeats.
-- Cooperative task/workflow cancellation.
-- Task and workflow event streams over SSE.
-- Audit events for important platform actions.
-
-## Run locally
-
-Copy `.env.platform.example` to `.env`, set a long random `OPENMANUS_JWT_SECRET`, then:
+For local Docker development:
 
 ```bash
 docker compose -f docker-compose.platform.yml up --build
 ```
 
-The API is available at `http://localhost:8000`.
+The compose stack runs PostgreSQL, Redis, migrations, the API and a dedicated OpenManus worker.
 
-Swagger/OpenAPI is available at `/docs`.
+The web console is available at `http://localhost:8000/` and API documentation at `http://localhost:8000/docs`.
 
-## Workflow prompts
+For non-Docker development, set the environment variables from `.env.platform.example`, run `alembic upgrade head`, then start the API and worker separately.
 
-Workflow step prompts may use these placeholders:
+## Approval behavior
 
-- `{{input}}` — the workflow run input.
-- `{{previous_output}}` — the previous step's output.
-- `{{step_index}}` — zero-based step index.
+A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails that task. High-risk host execution remains blocked by the execution boundary rather than being exposed directly.
 
-Example:
+## Execution boundary
 
-```json
-{
-  "name": "Research pipeline",
-  "steps": [
-    {"name": "Research", "prompt": "Research {{input}} and collect the important facts."},
-    {"name": "Synthesize", "prompt": "Using {{previous_output}}, produce a concise synthesis of {{input}}."}
-  ]
-}
+The platform blocks direct Bash, Docker and computer-use tools. Sandbox-pattern tools require `OPENMANUS_SANDBOX_ENABLED=true` and should be backed by an actual isolated sandbox service before public deployment. The default project policy is deliberately conservative.
+
+## Storage
+
+Artifacts are scoped to a project and owner. With `OPENMANUS_S3_BUCKET` configured, uploads go to the configured S3-compatible object store and API responses expose short-lived presigned download URLs. Without S3 configuration, files are stored under `OPENMANUS_ARTIFACT_ROOT` on the persistent application volume.
+
+## Usage and quotas
+
+Each project has monthly token/task and concurrent-task limits. Usage is estimated deterministically from stored text at roughly four characters per token and priced with `OPENMANUS_USAGE_INPUT_RATE` and `OPENMANUS_USAGE_OUTPUT_RATE`. These are platform accounting estimates and should be replaced with provider-reported usage for billing-grade accounting.
+
+## Database migrations
+
+Production deployments should run:
+
+```bash
+alembic upgrade head
 ```
 
-## Policy behavior
+The API can still auto-create tables for isolated local development with `OPENMANUS_AUTO_CREATE_DB=true`. Production should keep this disabled.
 
-The project policy is enforced immediately before an OpenManus tool executes. Explicit denies win. Approval-required patterns are denied until an approval mechanism is added in a later platform layer.
+## Important deployment boundary
 
-The default policy blocks shell, computer-use, sandbox and Docker tool names, while allowing normal planning, Python, web, Crawl4AI and Browser Use tools. Treat this as a development control plane, not a production security boundary until the full sandbox/policy/approval architecture is deployed.
-
-## Persistent memory and knowledge
-
-Memory is durable in PostgreSQL and can be scoped to a project or user. Knowledge documents are project-scoped. Current retrieval is deterministic keyword matching so the feature works without an external embedding service; the storage model is intentionally ready for a future vector/embedding backend.
-
-## Migration note
-
-The platform tables are additive. Existing OpenManus tables are not altered by this change, so a fresh platform database is sufficient for development. A real production migration system (Alembic) should be introduced before schema changes are deployed to live environments.
+This branch is a development-oriented operational platform, not a finished public SaaS. Before exposing untrusted users, run the full integration test suite in CI, use a real secrets manager, enable a real isolated sandbox backend, configure rate limits, and review the approval/retry semantics for your workload.
