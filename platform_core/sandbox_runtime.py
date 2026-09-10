@@ -4,6 +4,7 @@ from app.agent.sandbox_agent import SandboxManus
 from app.tool.sandbox.sb_preview_tool import SandboxPreviewTool
 from app.tool.sandbox.sb_visual_browser_tool import SandboxVisualBrowserTool
 from app.tool.tool_collection import ToolCollection
+from app.tool.web_search import WebSearch
 
 from platform_core.policy import PolicyToolBroker, ToolPolicy
 from platform_core.sandbox_boundary import enforce_tool_boundary
@@ -22,6 +23,7 @@ class PolicySandboxManus(SandboxManus):
         instance.available_tools.add_tools(
             SandboxVisualBrowserTool.create_with_sandbox(instance.sandbox),
             SandboxPreviewTool.create_with_sandbox(instance.sandbox),
+            WebSearch(),
         )
         return instance
 
