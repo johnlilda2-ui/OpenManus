@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenManus Website Builder</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif}body{margin:0;background:#0b1020;color:#edf2ff}.wrap{max-width:1280px;margin:auto;padding:24px}.card{background:#121a30;border:1px solid #263152;border-radius:16px;padding:18px;margin-bottom:16px}h1,h2,h3{margin-top:0}input,textarea,button{font:inherit;border-radius:10px;border:1px solid #35446f;padding:10px;background:#0e1528;color:inherit}button{cursor:pointer}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:180px}.grid{display:grid;grid-template-columns:360px 1fr;gap:16px}.preview{background:#fff;border-radius:12px;overflow:hidden;min-height:520px}.preview iframe{width:100%;height:650px;border:0;background:white}.muted{color:#98a6c7}.pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#1c2847}.section{border:1px solid #2a375d;border-radius:12px;padding:12px;margin:10px 0}.section textarea{width:100%;box-sizing:border-box;margin-top:8px}.asset,.token{padding:8px;border-bottom:1px solid #273253}.status{white-space:pre-wrap;background:#0a0f1d;padding:12px;border-radius:10px;min-height:100px;max-height:280px;overflow:auto}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>OpenManus Website Builder</h1>
+<p class="muted">Generate a website, preview it in the isolated environment, inspect its design system, and regenerate individual sections without rebuilding the whole site.</p>
+<div class="card">
+  <h2>Project</h2>
+  <div class="row"><input id="projectId" placeholder="Project ID"><input id="runId" placeholder="Completed Website Builder run ID"></div>
+  <div class="row" style="margin-top:10px"><button onclick="loadRun()">Load website</button><button onclick="refreshRuns()">Find recent runs</button></div>
+  <div id="runs" class="muted" style="margin-top:10px"></div>
+</div>
+<div class="card">
+  <h2>Create website</h2>
+  <input id="name" value="AI Website Builder" placeholder="Website name" style="width:100%;box-sizing:border-box">
+  <textarea id="requirements" rows="8" style="width:100%;box-sizing:border-box;margin-top:10px" placeholder="Build a modern logistics company website with Home, About, Services, Fleet, Contact and quote request form. Include a premium responsive design, SEO, accessibility, animations and strong calls to action."></textarea>
+  <button onclick="buildWebsite()" style="margin-top:10px">Build website</button>
+</div>
+<div class="grid">
+  <aside>
+    <div class="card"><h3>Experience</h3><div id="summary" class="muted">Load a Website Builder run.</div></div>
+    <div class="card"><h3>Design system</h3><div id="design" class="muted">Not loaded.</div></div>
+    <div class="card"><h3>Assets</h3><div id="assets" class="muted">Not loaded.</div></div>
+  </aside>
+  <main>
+    <div class="card"><h2>Live preview</h2><div id="previewInfo" class="muted" style="margin-bottom:10px">No preview.</div><div class="preview"><iframe id="previewFrame" title="Website preview" sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"></iframe></div></div>
+    <div class="card"><h2>Section editor</h2><p class="muted">Each section has a stable ID. Describe exactly what should change; unrelated sections are preserved.</p><div id="sections">No sections loaded.</div></div>
+    <div class="card"><h2>Events</h2><div id="status" class="status">Ready.</div></div>
+  </main>
+</div>
+</div>
+<script>
+const state={token:localStorage.getItem('om_token')||'',runId:null,projectId:null};
+const $=id=>document.getElementById(id);
+async function api(path,opts={}){opts.headers={...(opts.headers||{}),...(state.token?{Authorization:'Bearer '+state.token}:{})};if(opts.body&&typeof opts.body!=='string'){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)}const r=await fetch(path,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+async function buildWebsite(){try{const projectId=$('projectId').value.trim();const requirements=$('requirements').value.trim();if(!projectId||requirements.length<20)throw new Error('Enter a project ID and at least 20 characters of requirements.');const run=await api('/v1/projects/'+encodeURIComponent(projectId)+'/website-builder',{method:'POST',body:{name:$('name').value.trim()||'AI Website Builder',requirements,mode:'website'}});state.projectId=projectId;state.runId=run.run_id;$('runId').value=run.run_id;log('Website build queued: '+run.run_id);watch(run.run_id)}catch(e){log(e.message)}}
+async function loadRun(){try{const projectId=$('projectId').value.trim();const runId=$('runId').value.trim();if(!projectId||!runId)throw new Error('Enter project ID and run ID.');state.projectId=projectId;state.runId=runId;await loadExperience(runId);watch(runId)}catch(e){log(e.message)}}
+async function refreshRuns(){try{const p=$('projectId').value.trim();if(!p)throw new Error('Enter project ID first.');const runs=await api('/v1/projects/'+encodeURIComponent(p)+'/app-builder/runs');$('runs').innerHTML=runs.slice(0,20).map(r=>`<div class="section"><span class="pill">${esc(r.status)}</span> ${esc(r.id)}<br><button onclick="pickRun('${r.id}')">Load</button></div>`).join('')||'No runs.'}catch(e){$('runs').textContent=e.message}}
+function pickRun(id){$('runId').value=id;loadRun()}
+async function loadExperience(runId){const x=await api('/v1/app-builder/runs/'+encodeURIComponent(runId)+'/website-experience');$('summary').innerHTML=`Status: <b>${esc(x.status)}</b><br>Run: ${esc(x.run_id)}<br>Sections: ${x.sections.length}<br>Assets: ${x.assets.length}<br>Visual score: ${x.visual_score==null?'pending':esc(x.visual_score)}`;$('design').innerHTML=x.design_system&&Object.keys(x.design_system).length?renderDesign(x.design_system):'Design system not available yet.';$('assets').innerHTML=x.assets.length?x.assets.map(a=>`<div class="asset"><b>${esc(a.name)}</b><br><span class="muted">${esc(a.kind)} · ${esc(a.path_or_url||'specification only')}</span><br>${esc(a.alt_text||'No alt text')}</div>`).join(''):'No asset manifest yet.';$('sections').innerHTML=x.sections.length?x.sections.map(s=>`<div class="section"><b>${esc(s.name)}</b><br><span class="muted">${esc(s.section_id)} · ${esc(s.page)}</span><textarea id="i_${cssId(s.section_id)}" rows="2" placeholder="Example: Make this hero more premium, shorten the copy, and improve mobile spacing."></textarea><button onclick="iterate('${encodeURIComponent(s.section_id)}','i_${cssId(s.section_id)}')">Improve section</button></div>`).join(''):'No section manifest yet.';const p=await api('/v1/app-builder/runs/'+encodeURIComponent(runId)+'/preview');if(p.url){$('previewFrame').src=p.url;$('previewInfo').innerHTML=`<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open live preview ↗</a>`}const v=await api('/v1/app-builder/runs/'+encodeURIComponent(runId)+'/visual-score');if(v.score!=null)$('summary').innerHTML+=`<br>Visual similarity/diff score: <b>${esc(v.score)}</b>`}catch(e){log(e.message)}}
+function renderDesign(d){const toks=d.tokens||{};const comps=d.components||{};return `<pre style="white-space:pre-wrap;max-height:360px;overflow:auto">${esc(JSON.stringify({tokens:toks,components:comps,guidelines:d.guidelines||{}},null,2))}</pre>`}
+function cssId(s){return String(s).replace(/[^a-zA-Z0-9_-]/g,'_')}
+async function iterate(sectionId,fieldId){try{const instruction=$(fieldId).value.trim();if(instruction.length<5)throw new Error('Describe the change you want for this section.');const result=await api('/v1/app-builder/runs/'+encodeURIComponent(state.runId)+'/sections/'+sectionId+'/iterate',{method:'POST',body:{section_id:decodeURIComponent(sectionId),instruction}});log('Section iteration queued: '+result.run_id);$('runId').value=result.run_id;state.runId=result.run_id;watch(result.run_id)}catch(e){log(e.message)}}
+async function watch(runId){try{const r=await fetch('/v1/app-builder/runs/'+encodeURIComponent(runId)+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader(),decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data)log(data)}}}catch(e){log(e.message)}finally{try{await loadExperience(runId)}catch(_){}}}
+function log(s){$('status').textContent=typeof s==='string'?s:JSON.stringify(s,null,2)}
+if(!state.token)log('Log in to the operational platform first, then open this page.')
+</script>
+</body>
+</html>
