@@ -1,78 +1,77 @@
 # OpenManus Operational Platform Core
 
-This directory adds a production-oriented control plane around the existing OpenManus engine without replacing it.
+This directory adds a persistent control plane around the existing OpenManus agent engine.
 
-## Included in v0.1.0
+## Architecture
 
-- JWT authentication with Argon2 password hashing
-- PostgreSQL-ready persistence (SQLite is the local fallback)
-- Users, projects, conversations, messages, tasks, task events and audit events
-- Redis-backed background task queue
-- Dedicated worker that executes the existing `Manus` agent
-- Server-Sent Events for live task state updates
-- Cooperative task cancellation
-- Per-user ownership checks for platform resources
-- Docker Compose development stack with PostgreSQL, Redis, API and worker
-
-## Local development
-
-1. Install dependencies:
-
-```bash
-pip install -r requirements.txt
+```text
+Client
+  -> FastAPI API
+  -> JWT authentication and project ownership
+  -> PostgreSQL / SQLite
+  -> Redis queue
+  -> OpenManus worker
+  -> PolicyToolBroker
+  -> Manus engine + tools/MCP/browser
+  -> durable task/workflow events
+  -> SSE
 ```
 
-2. Copy `.env.platform.example` values into your environment. For production, set a strong `OPENMANUS_JWT_SECRET`.
+## Capabilities in v0.2
 
-3. Make sure the existing OpenManus LLM configuration is available at `config/config.toml`.
+- User registration and JWT authentication.
+- Project-scoped tool policies with allow/deny/approval patterns.
+- Persistent conversations and task history.
+- Persistent memory entries with lightweight keyword retrieval.
+- Project knowledge documents with retrieval.
+- Durable sequential workflows with persisted step runs.
+- Workflow recovery after stale worker heartbeats.
+- Cooperative task/workflow cancellation.
+- Task and workflow event streams over SSE.
+- Audit events for important platform actions.
 
-4. Start Redis locally, then run the API:
+## Run locally
 
-```bash
-uvicorn platform_core.api:app --reload
-```
-
-5. In a second terminal, start the worker:
-
-```bash
-python -m platform_core.worker
-```
-
-API documentation is available at `http://127.0.0.1:8000/docs`.
-
-## Docker Compose
+Copy `.env.platform.example` to `.env`, set a long random `OPENMANUS_JWT_SECRET`, then:
 
 ```bash
 docker compose -f docker-compose.platform.yml up --build
 ```
 
-The compose file supplies PostgreSQL and Redis. OpenManus still reads its normal model configuration from `config/config.toml`.
+The API is available at `http://localhost:8000`.
 
-## API flow
+Swagger/OpenAPI is available at `/docs`.
 
-```text
-register/login
-    -> create project
-    -> create conversation
-    -> create task
-    -> Redis queue
-    -> OpenManus worker
-    -> task events
-    -> SSE stream
-    -> persistent assistant message + audit event
+## Workflow prompts
+
+Workflow step prompts may use these placeholders:
+
+- `{{input}}` — the workflow run input.
+- `{{previous_output}}` — the previous step's output.
+- `{{step_index}}` — zero-based step index.
+
+Example:
+
+```json
+{
+  "name": "Research pipeline",
+  "steps": [
+    {"name": "Research", "prompt": "Research {{input}} and collect the important facts."},
+    {"name": "Synthesize", "prompt": "Using {{previous_output}}, produce a concise synthesis of {{input}}."}
+  ]
+}
 ```
 
-## Important security boundary
+## Policy behavior
 
-The existing OpenManus engine contains powerful local execution tools such as Bash and Python. The platform core currently protects resources at the user/tenant boundary, but a production deployment should add a centralized tool policy and isolated execution broker before exposing arbitrary code execution to untrusted users.
+The project policy is enforced immediately before an OpenManus tool executes. Explicit denies win. Approval-required patterns are denied until an approval mechanism is added in a later platform layer.
 
-## Next platform layers
+The default policy blocks shell, computer-use, sandbox and Docker tool names, while allowing normal planning, Python, web, Crawl4AI and Browser Use tools. Treat this as a development control plane, not a production security boundary until the full sandbox/policy/approval architecture is deployed.
 
-1. Database migrations (Alembic)
-2. Central policy/tool broker with approval gates
-3. Persistent long-term memory and project knowledge/RAG
-4. Durable resumable workflows and multi-agent orchestration
-5. Artifact/object storage and download permissions
-6. Usage, quotas, cost controls and billing hooks
-7. Web application and WebSocket/SSE task UI
-8. Metrics, tracing and production alerting
+## Persistent memory and knowledge
+
+Memory is durable in PostgreSQL and can be scoped to a project or user. Knowledge documents are project-scoped. Current retrieval is deterministic keyword matching so the feature works without an external embedding service; the storage model is intentionally ready for a future vector/embedding backend.
+
+## Migration note
+
+The platform tables are additive. Existing OpenManus tables are not altered by this change, so a fresh platform database is sufficient for development. A real production migration system (Alembic) should be introduced before schema changes are deployed to live environments.

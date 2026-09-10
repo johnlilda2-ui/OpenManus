@@ -41,11 +41,3 @@ crawl4ai~=0.6.3
 
 huggingface-hub~=0.29.2
 setuptools~=75.8.0
-
-# OpenManus Operational Platform
-SQLAlchemy>=2.0,<3
-asyncpg>=0.29,<1
-aiosqlite>=0.20,<1
-PyJWT>=2.8,<3
-pwdlib[argon2]>=0.2,<1
-redis>=5,<7
