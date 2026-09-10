@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -15,7 +16,7 @@ from platform_core.artifacts import storage
 from platform_core.auth import get_current_user
 from platform_core.database import SessionLocal, get_db
 from platform_core.events import add_audit_event, add_workflow_event
-from platform_core.models import Artifact, Project, ProjectPolicy, User, Workflow, WorkflowEvent, WorkflowRun
+from platform_core.models import Artifact, Project, ProjectPolicy, User, Workflow, WorkflowEvent, WorkflowRun, WorkflowStepRun
 from platform_core.permissions import PermissionDenied, require_project_role
 from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import AppBuilderCreate, AppBuilderResponse, WorkflowEventResponse, WorkflowRunDetailResponse
@@ -147,6 +148,34 @@ async def get_app_builder_run(
         raise HTTPException(status_code=404, detail="App Builder run not found")
     await project_access(session, run.project_id, user, "viewer")
     return WorkflowRunDetailResponse.model_validate(run)
+
+
+@router.get("/v1/app-builder/runs/{run_id}/preview")
+async def get_app_builder_preview(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str | None]:
+    run = await session.get(WorkflowRun, run_id)
+    if run is None or not run.status.startswith("builder_"):
+        raise HTTPException(status_code=404, detail="App Builder run not found")
+    await project_access(session, run.project_id, user, "viewer")
+    rows = await session.scalars(
+        select(WorkflowStepRun)
+        .where(WorkflowStepRun.workflow_run_id == run.id)
+        .order_by(WorkflowStepRun.step_index.desc())
+    )
+    for step in rows.all():
+        text = step.result or ""
+        for pattern in (
+            r"PREVIEW_URL\s*[:=]\s*(https?://[^\s)]+)",
+            r"preview\s+url[^:]*:\s*(https?://[^\s)]+)",
+            r"\"url\"\s*:\s*\"(https?://[^\"]+)\"",
+        ):
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                return {"status": "ready", "url": match.group(1).rstrip(".,"), "step": step.name}
+    return {"status": "not_ready", "url": None, "step": None}
 
 
 @router.get("/v1/app-builder/runs/{run_id}/artifact")
