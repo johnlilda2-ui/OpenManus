@@ -25,6 +25,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 async def init_db() -> None:
     from platform_core import models  # noqa: F401
+    from platform_core import website_models  # noqa: F401
 
     if not settings.auto_create_db:
         return
