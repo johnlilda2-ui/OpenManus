@@ -1,35 +1,81 @@
 # Global LLM configuration
 [llm]
-model = "claude-3-7-sonnet-20250219"
-base_url = "https://api.anthropic.com/v1/"
+model = "YOUR_DEFAULT_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
 # Use secret://openmanus_llm_api_key in production instead of committing a credential.
 api_key = "secret://openmanus_llm_api_key"
 max_tokens = 8192
-temperature = 0.0
+temperature = 0.2
+
+# The App Builder uses logical roles instead of hard-coding a vendor.
+# Point each role at the same provider or at different providers/models.
+# Requested profiles override these logical names when they exist; otherwise the router falls back to [llm].
+
+[llm.planner]
+model = "YOUR_REASONING_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.1
+
+[llm.builder]
+model = "YOUR_CODE_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.2
+
+[llm.designer]
+model = "YOUR_UI_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.4
+
+[llm.tester]
+model = "YOUR_FAST_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.1
+
+[llm.fixer]
+model = "YOUR_CODE_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.2
+
+[llm.reviewer]
+model = "YOUR_REVIEW_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.1
+
+[llm.vision]
+model = "YOUR_VISION_MODEL"
+base_url = "https://YOUR_OPENAI_COMPATIBLE_ENDPOINT/v1"
+api_key = "secret://openmanus_llm_api_key"
+max_tokens = 8192
+temperature = 0.2
 
 # Example Amazon Bedrock configuration:
 # api_type = "aws"
-# model = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+# model = "YOUR_BEDROCK_MODEL"
 # base_url = "bedrock-runtime.us-west-2.amazonaws.com"
 # api_key = "secret://bedrock_api_key"
 # max_tokens = 8192
-# temperature = 1.0
+# temperature = 0.2
 
 # Example Azure OpenAI configuration:
 # api_type = "azure"
 # model = "YOUR_MODEL_NAME"
 # base_url = "https://YOUR_AZURE_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT"
 # api_key = "secret://azure_api_key"
-# max_tokens = 8096
-# temperature = 0.0
-# api_version = "2024-08-01-preview"
-
-[llm.vision]
-model = "claude-3-7-sonnet-20250219"
-base_url = "https://api.anthropic.com/v1/"
-api_key = "secret://openmanus_llm_api_key"
-max_tokens = 8192
-temperature = 0.0
+# max_tokens = 8192
+# temperature = 0.2
+# api_version = "YOUR_API_VERSION"
 
 # Daytona-backed production sandbox configuration.
 [daytona]
