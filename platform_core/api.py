@@ -9,13 +9,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import from_url
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.auth import create_access_token, get_current_user, hash_password, verify_password
 from platform_core.database import SessionLocal, get_db, init_db
 from platform_core.events import add_audit_event, add_task_event
 from platform_core.models import Conversation, Message, Project, Task, TaskEvent, Tenant, TenantMember, User
+from platform_core.permissions import PermissionDenied, require_project_role
 from platform_core.queue import enqueue_task
 from platform_core.rate_limit import RateLimitExceeded, check_rate_limit
 from platform_core.schemas import ConversationCreate, ConversationResponse, LoginRequest, MessageResponse, ProjectCreate, ProjectResponse, RegisterRequest, TaskCreate, TaskEventResponse, TaskResponse, TokenResponse, UserResponse
@@ -59,22 +60,11 @@ async def enforce_rate_limit(request: Request, call_next):
     return await call_next(request)
 
 
-def require_owned_project(project: Project | None, user: User) -> Project:
-    if project is None or project.owner_id != user.id:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
-
-
-def require_owned_conversation(conversation: Conversation | None, user: User) -> Conversation:
-    if conversation is None or conversation.owner_id != user.id:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return conversation
-
-
-def require_owned_task(task: Task | None, user: User) -> Task:
-    if task is None or task.owner_id != user.id:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
+async def require_project_access(session: AsyncSession, project: Project | None, user: User, minimum_role: str) -> Project:
+    try:
+        return await require_project_role(session, project, user.id, minimum_role)
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=404 if project is None else 403, detail=str(exc)) from exc
 
 
 async def get_or_create_policy(session: AsyncSession, project_id: str):
@@ -145,34 +135,35 @@ async def create_project(payload: ProjectCreate, user: User = Depends(get_curren
 
 @app.get("/v1/projects", response_model=list[ProjectResponse])
 async def list_projects(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[ProjectResponse]:
-    result = await session.scalars(select(Project).where(Project.owner_id == user.id).order_by(Project.created_at.desc()))
+    membership_projects = select(TenantMember.tenant_id).where(TenantMember.user_id == user.id)
+    result = await session.scalars(select(Project).where(or_(Project.owner_id == user.id, Project.tenant_id.in_(membership_projects))).order_by(Project.created_at.desc()))
     return [ProjectResponse.model_validate(project) for project in result.all()]
 
 
 @app.post("/v1/projects/{project_id}/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(project_id: str, payload: ConversationCreate, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> ConversationResponse:
-    project = await session.get(Project, project_id)
-    require_owned_project(project, user)
-    conversation = Conversation(project_id=project_id, owner_id=user.id, title=payload.title.strip())
+    project = await require_project_access(session, await session.get(Project, project_id), user, "member")
+    conversation = Conversation(project_id=project.id, owner_id=user.id, title=payload.title.strip())
     session.add(conversation)
     await session.flush()
-    await add_audit_event(session, "conversation.created", actor_user_id=user.id, project_id=project_id)
+    await add_audit_event(session, "conversation.created", actor_user_id=user.id, project_id=project.id)
     await session.commit()
     return ConversationResponse(id=conversation.id, project_id=conversation.project_id, title=conversation.title, created_at=conversation.created_at, updated_at=conversation.updated_at, messages=[])
 
 
 @app.get("/v1/projects/{project_id}/conversations", response_model=list[ConversationResponse])
 async def list_conversations(project_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[ConversationResponse]:
-    project = await session.get(Project, project_id)
-    require_owned_project(project, user)
-    result = await session.scalars(select(Conversation).where(Conversation.project_id == project_id, Conversation.owner_id == user.id).order_by(Conversation.updated_at.desc()))
+    project = await require_project_access(session, await session.get(Project, project_id), user, "viewer")
+    result = await session.scalars(select(Conversation).where(Conversation.project_id == project.id).order_by(Conversation.updated_at.desc()))
     return [ConversationResponse(id=c.id, project_id=c.project_id, title=c.title, created_at=c.created_at, updated_at=c.updated_at, messages=[]) for c in result.all()]
 
 
 @app.get("/v1/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> ConversationResponse:
     conversation = await session.get(Conversation, conversation_id)
-    require_owned_conversation(conversation, user)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await require_project_access(session, await session.get(Project, conversation.project_id), user, "viewer")
     messages = await session.scalars(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()))
     return ConversationResponse(id=conversation.id, project_id=conversation.project_id, title=conversation.title, created_at=conversation.created_at, updated_at=conversation.updated_at, messages=[MessageResponse.model_validate(message) for message in messages.all()])
 
@@ -180,9 +171,9 @@ async def get_conversation(conversation_id: str, user: User = Depends(get_curren
 @app.post("/v1/conversations/{conversation_id}/tasks", response_model=TaskResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_task(conversation_id: str, payload: TaskCreate, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
     conversation = await session.get(Conversation, conversation_id)
-    require_owned_conversation(conversation, user)
-    project = await session.get(Project, conversation.project_id)
-    require_owned_project(project, user)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    project = await require_project_access(session, await session.get(Project, conversation.project_id), user, "member")
     prompt = payload.prompt.strip()
     allowed, reason, _ = await check_quota(session, project.id, prompt)
     if not allowed:
@@ -205,23 +196,26 @@ async def create_task(conversation_id: str, payload: TaskCreate, user: User = De
 
 @app.get("/v1/projects/{project_id}/tasks", response_model=list[TaskResponse])
 async def list_tasks(project_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[TaskResponse]:
-    project = await session.get(Project, project_id)
-    require_owned_project(project, user)
-    result = await session.scalars(select(Task).where(Task.project_id == project_id, Task.owner_id == user.id).order_by(Task.created_at.desc()))
+    project = await require_project_access(session, await session.get(Project, project_id), user, "viewer")
+    result = await session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.created_at.desc()))
     return [TaskResponse.model_validate(task) for task in result.all()]
 
 
 @app.get("/v1/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
     task = await session.get(Task, task_id)
-    require_owned_task(task, user)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_project_access(session, await session.get(Project, task.project_id), user, "viewer")
     return TaskResponse.model_validate(task)
 
 
 @app.post("/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
 async def cancel_task(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
     task = await session.get(Task, task_id)
-    task = require_owned_task(task, user)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_project_access(session, await session.get(Project, task.project_id), user, "member")
     if task.status in {"completed", "failed", "cancelled"}:
         return TaskResponse.model_validate(task)
     task.cancel_requested = True
@@ -239,7 +233,9 @@ async def cancel_task(task_id: str, user: User = Depends(get_current_user), sess
 @app.get("/v1/tasks/{task_id}/events")
 async def task_events(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db), last_event_id: int | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
     task = await session.get(Task, task_id)
-    require_owned_task(task, user)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_project_access(session, await session.get(Project, task.project_id), user, "viewer")
     starting_id = max(last_event_id or 0, 0)
 
     async def stream() -> AsyncIterator[str]:
