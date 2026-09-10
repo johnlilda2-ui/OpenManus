@@ -34,6 +34,12 @@ setup(
         "aiofiles~=24.1.0",
         "pydantic_core>=2.27.2,<2.28.0",
         "colorama~=0.4.6",
+        "SQLAlchemy>=2.0,<3",
+        "asyncpg>=0.29,<1",
+        "aiosqlite>=0.20,<1",
+        "PyJWT>=2.8,<3",
+        "pwdlib[argon2]>=0.2,<1",
+        "redis>=5,<7",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
