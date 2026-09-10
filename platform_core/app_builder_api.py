@@ -105,6 +105,8 @@ async def create_app_builder_run(
             "created_at": workflow.created_at,
             "updated_at": workflow.updated_at,
         },
+        run_id=run.id,
+        status=run.status,
         workspace=project_workspace(project.id),
     )
 
@@ -163,11 +165,7 @@ async def get_app_builder_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Application artifact not found")
     url = storage.presigned_url(artifact.storage_key) or f"/v1/artifacts/{artifact.id}"
-    return {
-        "artifact_id": artifact.id,
-        "filename": artifact.filename,
-        "download_url": url,
-    }
+    return {"artifact_id": artifact.id, "filename": artifact.filename, "download_url": url}
 
 
 @router.post("/v1/app-builder/runs/{run_id}/cancel", response_model=WorkflowRunDetailResponse)
