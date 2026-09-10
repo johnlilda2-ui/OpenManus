@@ -40,28 +40,10 @@ def month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
 
 async def current_usage(session: AsyncSession, project_id: str) -> dict[str, int]:
     start, end = month_bounds()
-    token_total = await session.scalar(
-        select(func.coalesce(func.sum(UsageRecord.total_tokens), 0)).where(
-            UsageRecord.project_id == project_id,
-            UsageRecord.created_at >= start,
-            UsageRecord.created_at <= end,
-        )
-    )
-    task_total = await session.scalar(
-        select(func.count(Task.id)).where(
-            Task.project_id == project_id,
-            Task.created_at >= start,
-            Task.created_at <= end,
-        )
-    )
-    running_total = await session.scalar(
-        select(func.count(Task.id)).where(Task.project_id == project_id, Task.status.in_(["queued", "running", "awaiting_approval"]))
-    )
-    return {
-        "tokens": int(token_total or 0),
-        "tasks": int(task_total or 0),
-        "concurrent": int(running_total or 0),
-    }
+    token_total = await session.scalar(select(func.coalesce(func.sum(UsageRecord.total_tokens), 0)).where(UsageRecord.project_id == project_id, UsageRecord.created_at >= start, UsageRecord.created_at <= end))
+    task_total = await session.scalar(select(func.count(Task.id)).where(Task.project_id == project_id, Task.created_at >= start, Task.created_at <= end))
+    running_total = await session.scalar(select(func.count(Task.id)).where(Task.project_id == project_id, Task.status.in_(["queued", "running", "awaiting_approval"])))
+    return {"tokens": int(token_total or 0), "tasks": int(task_total or 0), "concurrent": int(running_total or 0)}
 
 
 async def check_quota(session: AsyncSession, project_id: str, prompt: str) -> tuple[bool, str, ProjectQuota]:
@@ -85,17 +67,21 @@ async def record_usage(
     task_id: str | None,
     input_text: str,
     output_text: str,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    usage_source: str = "estimated",
 ) -> UsageRecord:
-    input_tokens = estimate_tokens(input_text)
-    output_tokens = estimate_tokens(output_text)
+    input_count = max(0, int(input_tokens if input_tokens is not None else estimate_tokens(input_text)))
+    output_count = max(0, int(output_tokens if output_tokens is not None else estimate_tokens(output_text)))
     record = UsageRecord(
         owner_id=owner_id,
         project_id=project_id,
         task_id=task_id,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-        estimated_cost_usd=estimate_cost(input_tokens, output_tokens),
+        input_tokens=input_count,
+        output_tokens=output_count,
+        total_tokens=input_count + output_count,
+        usage_source=usage_source,
+        estimated_cost_usd=estimate_cost(input_count, output_count),
     )
     session.add(record)
     await session.flush()
