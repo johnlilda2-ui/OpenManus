@@ -16,6 +16,7 @@ class Settings:
     jwt_algorithm: str = os.getenv("OPENMANUS_JWT_ALGORITHM", "HS256")
     access_token_minutes: int = int(os.getenv("OPENMANUS_ACCESS_TOKEN_MINUTES", "60"))
     queue_name: str = os.getenv("OPENMANUS_QUEUE", "openmanus:tasks")
+    builder_queue_name: str = os.getenv("OPENMANUS_BUILDER_QUEUE", "openmanus:app-builder")
     workflow_stale_seconds: int = int(os.getenv("OPENMANUS_WORKFLOW_STALE_SECONDS", "900"))
     auto_create_db: bool = _bool("OPENMANUS_AUTO_CREATE_DB", True)
     sandbox_enabled: bool = _bool("OPENMANUS_SANDBOX_ENABLED", False)
