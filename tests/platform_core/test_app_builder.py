@@ -27,31 +27,43 @@ def test_app_builder_has_autonomous_release_phases():
     assert "project-123" in steps[0]["prompt"]
 
 
-def test_website_builder_has_design_seo_and_browser_phases():
+def test_website_builder_has_design_system_seo_and_browser_phases():
     steps = build_website_builder_steps(
         "site-456",
         "Build a modern logistics company website with Home, Services, Fleet and Contact",
     )
-    assert len(steps) == 10
+    assert len(steps) == 12
     names = [step["name"] for step in steps]
     assert names[0] == "Website strategy and information architecture"
-    assert names[2] == "Visual frontend implementation"
-    assert names[3] == "SEO, accessibility and performance hardening"
-    assert names[5] == "Run and preview"
-    assert steps[6]["role"] == "tester"
-    assert steps[7]["browser_required"] is True
-    assert steps[8]["role"] == "fixer"
-    assert steps[9]["browser_required"] is False
-    assert "sitemap.xml" in steps[3]["prompt"]
-    assert "QA_STATUS: FAIL" in steps[7]["prompt"]
+    assert names[1] == "Design system and page manifest"
+    assert names[2] == "Content and page system"
+    assert names[3] == "Visual frontend implementation"
+    assert names[4] == "SEO, accessibility and performance hardening"
+    assert names[6] == "Run and preview"
+    assert names[7] == "Automated website test and repair"
+    assert names[8] == "Browser visual and UX verification"
+    assert names[9] == "Autonomous website repair"
+    assert names[10] == "Browser re-verification and visual diff"
+    assert names[11] == "Final website release review"
+    assert steps[1]["role"] == "designer"
+    assert steps[8]["browser_required"] is True
+    assert steps[10]["browser_required"] is True
+    assert "DESIGN_SYSTEM_JSON" in steps[1]["prompt"]
+    assert "SECTION_MANIFEST_JSON" in steps[1]["prompt"]
+    assert "ASSET_MANIFEST_JSON" in steps[1]["prompt"]
+    assert "sitemap.xml" in steps[4]["prompt"]
+    assert "sandbox_preview" in steps[6]["prompt"]
+    assert "QA_STATUS: FAIL" in steps[8]["prompt"]
+    assert "QA_STATUS: PASS" in steps[10]["prompt"]
+    assert "visual_diff_score" in steps[10]["prompt"]
     assert "site-456" in steps[0]["prompt"]
 
 
-def test_website_builder_reuses_autonomous_preview_repair_loop():
+def test_website_builder_preserves_section_targets_for_iteration():
     steps = build_website_builder_steps("site-789", "Build a responsive business website")
-    assert "sandbox_preview" in steps[5]["prompt"]
-    assert "QA_FAILURES.md" in steps[8]["prompt"]
-    assert "QA_STATUS: PASS" in steps[9]["prompt"]
+    assert "home.hero" not in steps[1]["prompt"]
+    assert "stable section IDs" in steps[3]["prompt"]
+    assert "QA_FAILURES.md" in steps[9]["prompt"]
 
 
 def test_workflow_normalization_preserves_builder_metadata():
