@@ -30,10 +30,7 @@ Requirements from the user:
 """.strip()
 
     steps = [
-        BuilderStep(
-            name="Requirements and architecture",
-            role="planner",
-            prompt=f"""{shared}
+        BuilderStep(name="Requirements and architecture", role="planner", prompt=f"""{shared}
 
 Analyze the requirements and inspect any existing project files. Create {workspace}/APP_PLAN.md containing:
 - product requirements and acceptance criteria
@@ -42,37 +39,23 @@ Analyze the requirements and inspect any existing project files. Create {workspa
 - UI pages/components and responsive states
 - test strategy
 - local development and deployment requirements
-Do not implement the application yet.""",
-        ),
-        BuilderStep(
-            name="Backend implementation",
-            role="builder",
-            prompt=f"""{shared}
+Do not implement the application yet."""),
+        BuilderStep(name="Backend implementation", role="builder", prompt=f"""{shared}
 
 Read APP_PLAN.md. Implement the backend first. Prefer FastAPI + Pydantic when a
 Python backend is appropriate. Create working API routes, validation, error
 handling, persistence, authentication when required by the requirements, and
 backend tests. Keep configuration in environment variables and add a safe
-.env.example. Run the backend tests and fix failures before finishing.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Frontend implementation",
-            role="designer",
-            prompt=f"""{shared}
+.env.example. Run the backend tests and fix failures before finishing.""", max_attempts=2),
+        BuilderStep(name="Frontend implementation", role="designer", prompt=f"""{shared}
 
 Read APP_PLAN.md and the backend API. Implement a production-quality frontend.
 Prefer React + Vite with Tailwind CSS when appropriate. Build the complete user
 experience, not placeholder cards: responsive layout, loading/empty/error
 states, accessible controls, consistent typography and spacing, clear
 navigation, useful micro-interactions, and polished visual hierarchy. Connect
-real API data instead of mock-only data. Run the frontend build and fix errors.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Integration and preview configuration",
-            role="builder",
-            prompt=f"""{shared}
+real API data instead of mock-only data. Run the frontend build and fix errors.""", max_attempts=2),
+        BuilderStep(name="Integration and preview configuration", role="builder", prompt=f"""{shared}
 
 Integrate frontend and backend end-to-end. Remove fake/mock data paths that are
 not required for the finished application. Add docker-compose.yml when useful,
@@ -88,13 +71,8 @@ Also create {workspace}/APP_PREVIEW.json describing the safest local preview:
   "cwd": "."
 }}
 Use a non-privileged port. The command will run inside the isolated project
-sandbox only. Keep the preview server suitable for browser verification.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Run and preview",
-            role="tester",
-            prompt=f"""{shared}
+sandbox only. Keep the preview server suitable for browser verification.""", max_attempts=2),
+        BuilderStep(name="Run and preview", role="tester", prompt=f"""{shared}
 
 Read APP_PREVIEW.json and launch the application inside the isolated sandbox.
 Use sandbox_shell to run the exact preview command in a persistent named session.
@@ -113,27 +91,16 @@ preview URL. Write {workspace}/PREVIEW_REPORT.md containing:
 
 Leave the preview process running for the following QA phases unless it cannot
 be started safely. If isolated sandbox tools are unavailable, document that
-preview execution could not be performed rather than attempting host execution.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Automated test and repair",
-            role="tester",
-            prompt=f"""{shared}
+preview execution could not be performed rather than attempting host execution.""", max_attempts=2),
+        BuilderStep(name="Automated test and repair", role="tester", prompt=f"""{shared}
 
 Act as a release engineer. Read PREVIEW_REPORT.md if present and run the backend
 tests, frontend tests if present, linters/type checks where configured, and
 production builds. Diagnose failures instead of merely reporting them. Fix the
 implementation and rerun the failed checks. Continue until the available
 automated checks pass or a real external credential/dependency is clearly the
-only blocker. Record the final checks and any blockers in {workspace}/QA_REPORT.md.""",
-            max_attempts=3,
-        ),
-        BuilderStep(
-            name="Browser verification",
-            role="reviewer",
-            browser_required=True,
-            prompt=f"""{shared}
+only blocker. Record the final checks and any blockers in {workspace}/QA_REPORT.md.""", max_attempts=3),
+        BuilderStep(name="Browser verification", role="reviewer", browser_required=True, prompt=f"""{shared}
 
 Perform real browser-level QA against the running preview. Read
 PREVIEW_REPORT.md and use its preview URL; do not invent another URL. Use
@@ -156,13 +123,8 @@ QA_STATUS: FAIL
 For PASS, explain what was actually verified. For FAIL, provide concise,
 actionable failure details for the repair phase. If browser tooling is not
 available, end with QA_STATUS: FAIL and clearly state that verification was not
-performed.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Autonomous repair",
-            role="fixer",
-            prompt=f"""{shared}
+performed.""", max_attempts=2),
+        BuilderStep(name="Autonomous repair", role="fixer", prompt=f"""{shared}
 
 Read QA_FAILURES.md and PREVIEW_REPORT.md. If the previous browser verification
 reported QA_STATUS: PASS, do not make functional changes; simply record that no
@@ -172,14 +134,8 @@ If QA_STATUS: FAIL, fix every reproducible browser issue you can. Use the
 sandbox shell/files tools only inside the isolated workspace. Restart the preview
 process when required, rerun focused automated checks, and update
 {workspace}/REPAIR_REPORT.md with each repair and its verification result.
-Finish by stating either REPAIR_STATUS: FIXED or REPAIR_STATUS: BLOCKED.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Browser re-verification",
-            role="reviewer",
-            browser_required=True,
-            prompt=f"""{shared}
+Finish by stating either REPAIR_STATUS: FIXED or REPAIR_STATUS: BLOCKED.""", max_attempts=2),
+        BuilderStep(name="Browser re-verification", role="reviewer", browser_required=True, prompt=f"""{shared}
 
 Re-run browser QA after the repair phase. Read PREVIEW_REPORT.md and
 REPAIR_REPORT.md and use the same running preview when possible. Exercise the
@@ -194,13 +150,8 @@ problems and end with:
 QA_STATUS: FAIL
 
 Do not claim success for checks you could not actually perform. If browser
-verification is unavailable, report QA_STATUS: FAIL rather than inventing a pass.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Final security and release review",
-            role="reviewer",
-            prompt=f"""{shared}
+verification is unavailable, report QA_STATUS: FAIL rather than inventing a pass.""", max_attempts=2),
+        BuilderStep(name="Final security and release review", role="reviewer", prompt=f"""{shared}
 
 Perform a final release review. Check for hard-coded credentials/secrets,
 unsafe debug settings, missing environment documentation, obvious authorization
@@ -210,8 +161,7 @@ when present. Fix issues that can be fixed locally. Produce:
 - {workspace}/RELEASE_CHECKLIST.md
 - {workspace}/FINAL_REPORT.md
 The final report must state what was verified, what was not verified, any
-remaining blockers, and the preview URL when one was successfully created.""",
-        ),
+remaining blockers, and the preview URL when one was successfully created."""),
     ]
     return [
         {
