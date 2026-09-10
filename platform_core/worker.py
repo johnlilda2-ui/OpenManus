@@ -8,7 +8,6 @@ from sqlalchemy import select, update
 
 from app.agent.manus import Manus
 from platform_core.approvals import create_or_get_approval
-from platform_core.artifacts import storage
 from platform_core.database import SessionLocal, init_db
 from platform_core.events import add_audit_event, add_task_event, add_workflow_event
 from platform_core.memory import build_context, search_knowledge, search_memory
@@ -62,11 +61,9 @@ async def build_agent_prompt(session, *, owner_id: str, project_id: str, convers
 async def claim_queued_task(task_id: str | None = None) -> str | None:
     async with SessionLocal() as session:
         now = datetime.now(timezone.utc)
-        candidate_id = task_id
+        candidate_id = task_id or await session.scalar(select(Task.id).where(Task.status == "queued").order_by(Task.created_at.asc()).limit(1))
         if candidate_id is None:
-            candidate_id = await session.scalar(select(Task.id).where(Task.status == "queued").order_by(Task.created_at.asc()).limit(1))
-            if candidate_id is None:
-                return None
+            return None
         result = await session.execute(update(Task).where(Task.id == candidate_id, Task.status == "queued", Task.cancel_requested.is_(False)).values(status="running", started_at=now))
         if result.rowcount != 1:
             return None
@@ -196,7 +193,8 @@ async def process_workflow_run(run_id: str) -> None:
             run = await session.get(WorkflowRun, run_id)
             if run is None:
                 return
-            step = await session.scalar(select(WorkflowStepRun).where(WorkflowStepRun.workflow_run_id == run.id, WorkflowStepRun.step_index == run.current_step))
+            step_index = run.current_step
+            step = await session.scalar(select(WorkflowStepRun).where(WorkflowStepRun.workflow_run_id == run.id, WorkflowStepRun.step_index == step_index))
             if step is not None:
                 step.status = "completed"
                 step.result = result[:50000]
@@ -205,7 +203,8 @@ async def process_workflow_run(run_id: str) -> None:
             run.current_step += 1
             run.heartbeat_at = datetime.now(timezone.utc)
             total_steps = len((await session.get(Workflow, run.workflow_id)).steps_json)
-            await add_workflow_event(session, run.id, "workflow.step_completed", {"step_index": run.current_step - 1, "next_step": run.current_step, "result": result[:10000]})
+            await record_usage(session, owner_id=run.owner_id, project_id=run.project_id, task_id=None, input_text=enriched, output_text=result)
+            await add_workflow_event(session, run.id, "workflow.step_completed", {"step_index": step_index, "next_step": run.current_step, "result": result[:10000]})
             if run.cancel_requested:
                 run.status = "cancelled"
                 run.completed_at = datetime.now(timezone.utc)
@@ -218,7 +217,7 @@ async def process_workflow_run(run_id: str) -> None:
             else:
                 run.status = "queued"
                 await add_workflow_event(session, run.id, "workflow.queued_next", {"status": run.status, "step": run.current_step})
-            session.add(MemoryEntry(owner_id=run.owner_id, project_id=run.project_id, kind="workflow_step", key=f"{run.workflow_id}:{run.current_step - 1}", content=result[:20000], importance=35, metadata_json={"workflow_run_id": run.id, "step_index": run.current_step - 1}))
+            session.add(MemoryEntry(owner_id=run.owner_id, project_id=run.project_id, kind="workflow_step", key=f"{run.workflow_id}:{step_index}", content=result[:20000], importance=35, metadata_json={"workflow_run_id": run.id, "step_index": step_index}))
             await session.commit()
             next_status = run.status
         if next_status == "queued":
@@ -226,18 +225,24 @@ async def process_workflow_run(run_id: str) -> None:
                 await enqueue_workflow(run_id)
             except Exception:
                 logger.exception("Could not requeue workflow %s; recovery sweep will handle it", run_id)
-    except (ToolApprovalRequired, PolicyDenied, SandboxBoundaryDenied) as exc:
+    except ToolApprovalRequired as exc:
+        logger.error("Workflow %s requested approval for %s; workflow-specific approval records are not enabled yet", run_id, exc.tool_name)
         async with SessionLocal() as session:
             run = await session.get(WorkflowRun, run_id)
             if run is not None:
-                if isinstance(exc, ToolApprovalRequired):
-                    run.status = "awaiting_approval"
-                    await add_workflow_event(session, run.id, "approval.required", {"status": run.status, "tool": exc.tool_name, "reason": exc.reason})
-                else:
-                    run.status = "failed"
-                    run.error = str(exc)[:10000]
-                    await add_workflow_event(session, run.id, "policy.denied", {"status": run.status, "reason": str(exc)[:2000]})
-                run.completed_at = datetime.now(timezone.utc) if run.status == "failed" else None
+                run.status = "failed"
+                run.error = f"Workflow approval required for tool '{exc.tool_name}'. Use a task approval flow or remove approval requirement from this workflow."
+                run.completed_at = datetime.now(timezone.utc)
+                await add_workflow_event(session, run.id, "workflow.approval_unsupported", {"status": run.status, "tool": exc.tool_name})
+                await session.commit()
+    except (PolicyDenied, SandboxBoundaryDenied) as exc:
+        async with SessionLocal() as session:
+            run = await session.get(WorkflowRun, run_id)
+            if run is not None:
+                run.status = "failed"
+                run.error = str(exc)[:10000]
+                run.completed_at = datetime.now(timezone.utc)
+                await add_workflow_event(session, run.id, "policy.denied", {"status": run.status, "reason": str(exc)[:2000]})
                 await session.commit()
     except Exception as exc:
         logger.exception("Workflow run %s failed", run_id)
