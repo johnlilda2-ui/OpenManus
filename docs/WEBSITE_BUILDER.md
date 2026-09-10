@@ -6,37 +6,51 @@ Website Builder is a specialized mode of the OpenManus AI Builder for production
 
 The mode is optimized for business and company websites, landing pages and marketing sites, portfolios, blogs and content sites, documentation, marketplaces, and responsive multi-page frontend experiences. It can also add a backend/API when dynamic behavior is required.
 
-## Research-driven design selection
+## Pre-build design selection
 
-Before full implementation, the Website Builder can run a lightweight design-research task. It classifies the request and researches the public web for **exactly 1 or 2** relevant design/UX references when web search is available. Marketplace requests specifically evaluate discovery, search, categories, filters, listing cards, seller identity, trust signals, and buyer/seller journeys.
+Before full implementation, the Website Builder provides a design-selection stage. A lightweight research task classifies the request and uses the available web-search/browser tools to find **exactly 1 or 2** relevant public design/UX references when live search is available. For marketplace requests, research focuses on discovery, search, categories, filters, listing cards, seller identity, trust signals, and buyer/seller journeys.
 
-The research task returns **up to 2 reference design directions plus 1 original OpenManus design direction**. Each option contains a compact visual design board (style, layout, typography and palette), useful extracted patterns, and a source link when it is a reference. The UI presents these options before the full build so the user can choose the direction they want.
+The user then receives up to **three selectable design directions**:
 
-Reference options are inspiration and benchmarking only. The agent is instructed not to copy proprietary text, images, logos, trademarks, source code, exact layouts, or branded identity. The original OpenManus option is generated independently from the references. If web search is unavailable, the task records that limitation and does not invent reference URLs.
+- **Reference design 1** — a visual inspiration board derived from the first researched site, with the original source link and extracted design/UX patterns.
+- **Reference design 2** — shown when a second strong reference is found, with its source link and extracted patterns.
+- **Original OpenManus concept** — an independent design direction generated from the user's requirements rather than copied from a reference.
 
-The user's chosen direction is then appended to the real Website Builder requirements as a design directive. Reference selections remain explicitly marked as inspiration-only, so the final implementation stays original while honoring the user's selected visual direction.
+The reference cards are intentionally design boards rather than copied website screenshots. This keeps the builder focused on reusable visual/UX ideas while linking users to the real public source for inspection. The agent is instructed not to copy proprietary text, images, logos, trademarks, source code, exact layouts, or branded identity.
+
+The chosen option becomes a `SELECTED_DESIGN_DIRECTION` directive for the real Website Builder run. Reference selections remain inspiration-only; the implementation remains original and faithful to the user's requirements.
+
+If search is unavailable, the design task records that limitation without inventing URLs and the original OpenManus concept remains available for selection.
+
+## Research-driven design
+
+After selection, the full Website Builder still performs its own research-informed planning so the selected direction is combined with the site's actual information architecture, content, accessibility, SEO, and functional requirements.
+
+Research is stored in `WEBSITE_RESEARCH.md` and `WEBSITE_RESEARCH.json`. The build creates a coherent original design system rather than cloning a source site.
 
 ## Autonomous workflow
 
 After the user selects a design direction, Website Builder uses the same durable worker, policy layer, isolated sandbox, artifact store and model router as the general App Builder, with website-specific design and iteration state.
 
-1. Selected design direction from pre-build gallery
-2. Reference research and design inspiration during the build
-3. Website strategy and information architecture
-4. Design system and page/section/asset manifest generation
-5. Content and page system
-6. Visual asset creation and sourcing
-7. Visual frontend implementation
-8. SEO, accessibility and performance hardening
-9. Integration and preview configuration
-10. Run and preview in the isolated sandbox
-11. Automated website testing and repair
-12. Browser visual/UX verification with deterministic visual snapshot baselines
-13. Autonomous website repair
-14. Browser re-verification with visual similarity/diff scoring
-15. Final website security and release review
+1. User requests website and starts design research
+2. Pre-build gallery returns 1–2 researched references plus 1 original concept
+3. User selects a design direction
+4. Reference research and design inspiration during the build
+5. Website strategy and information architecture
+6. Design system and page/section/asset manifest generation
+7. Content and page system
+8. Visual asset creation and sourcing
+9. Visual frontend implementation
+10. SEO, accessibility and performance hardening
+11. Integration and preview configuration
+12. Run and preview in the isolated sandbox
+13. Automated website testing and repair
+14. Browser visual/UX verification with deterministic visual snapshot baselines
+15. Autonomous website repair
+16. Browser re-verification with visual similarity/diff scoring
+17. Final website security and release review
 
-The research gallery is a pre-build selection step; the durable implementation workflow begins only after a direction is chosen. Browser phases fail closed: unavailable browser tooling is reported as failed verification rather than a fabricated pass.
+Browser phases fail closed: unavailable browser tooling is reported as failed verification rather than a fabricated pass.
 
 ## Design system
 
@@ -68,7 +82,7 @@ The dedicated authenticated workspace is available at:
 
 `GET /website-builder`
 
-It displays the live preview, research references, design system, asset manifest, stable sections and per-section **Improve section** actions. The workspace also provides the pre-build design gallery when starting a new site, with selectable reference and original design boards.
+It displays the pre-build design gallery, live preview, research references, design system, asset manifest, stable sections and per-section **Improve section** actions. During an iteration, the parent website remains the editor's source of truth while the child run streams its progress.
 
 ## Marketplace-specific behavior
 
@@ -88,18 +102,9 @@ Create a website run with:
 
 `POST /v1/projects/{project_id}/website-builder`
 
-Example request body:
-
-```json
-{
-  "name": "Acme Marketplace",
-  "requirements": "Build a premium marketplace for independent artisans with discovery, categories, search, filters, listing cards, seller profiles, trust signals, favorites, and responsive buyer/seller journeys."
-}
-```
-
 The response contains the workflow, durable run ID, workspace and `mode: "website"`.
 
-The pre-build gallery uses the existing authenticated task API to research and return `DESIGN_OPTIONS_JSON`. The selected option is then included as a design directive when the real Website Builder run is created.
+The design gallery itself uses the existing authenticated task API for the lightweight pre-build research step. Once a design is selected in the workspace, the selected direction is included in the real Website Builder requirements.
 
 ## Model routing
 
