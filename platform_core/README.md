@@ -33,7 +33,9 @@ For non-Docker development, set the environment variables from `.env.platform.ex
 
 ## Approval behavior
 
-A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails that task. High-risk host execution remains blocked by the execution boundary rather than being exposed directly.
+A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails that task.
+
+Approval currently re-queues the task from its persisted prompt rather than checkpointing the exact in-memory agent state. Do not use approval-required patterns for non-idempotent side effects until checkpointed tool execution is added.
 
 ## Execution boundary
 
@@ -59,4 +61,4 @@ The API can still auto-create tables for isolated local development with `OPENMA
 
 ## Important deployment boundary
 
-This branch is a development-oriented operational platform, not a finished public SaaS. Before exposing untrusted users, run the full integration test suite in CI, use a real secrets manager, enable a real isolated sandbox backend, configure rate limits, and review the approval/retry semantics for your workload.
+This is a development-oriented operational platform, not a finished public SaaS. Before exposing untrusted users, run the full integration test suite in CI, use a real secrets manager, enable a real isolated sandbox backend, add rate limits/tenant roles, and verify provider-reported billing usage.
