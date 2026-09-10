@@ -38,11 +38,13 @@ class SandboxPreviewTool(SandboxToolsBase):
         await self._ensure_sandbox()
         preview = self.sandbox.get_preview_link(int(port))
         url = preview.url if hasattr(preview, "url") else str(preview)
-        return self.success_response({
-            "port": int(port),
-            "url": url,
-            "message": "Preview URL ready. Keep the application process running while testing.",
-        })
+        return self.success_response(
+            {
+                "port": int(port),
+                "url": url,
+                "message": "Preview URL ready. Keep the application process running while testing.",
+            }
+        )
 
     @classmethod
     def create_with_sandbox(cls, sandbox: Sandbox) -> "SandboxPreviewTool":
