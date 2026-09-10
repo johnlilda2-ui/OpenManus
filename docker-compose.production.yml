@@ -5,7 +5,9 @@ services:
       dockerfile: Dockerfile.platform
     command: ["alembic", "upgrade", "head"]
     environment:
-      OPENMANUS_ENV: production
+      # Migration jobs do not start the application runtime, so they use the
+      # non-production config validation path while still targeting production DBs.
+      OPENMANUS_ENV: development
       OPENMANUS_AUTO_CREATE_DB: "false"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     restart: "no"
@@ -33,6 +35,8 @@ services:
       - ./config:/app/config:ro
     secrets:
       - openmanus_jwt_secret
+      - openmanus_llm_api_key
+      - openmanus_daytona_api_key
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -56,6 +60,8 @@ services:
       - ./config:/app/config:ro
     secrets:
       - openmanus_jwt_secret
+      - openmanus_llm_api_key
+      - openmanus_daytona_api_key
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -65,4 +71,8 @@ volumes:
 
 secrets:
   openmanus_jwt_secret:
+    external: true
+  openmanus_llm_api_key:
+    external: true
+  openmanus_daytona_api_key:
     external: true
