@@ -22,11 +22,27 @@ def normalize_steps(steps: list[dict]) -> list[dict]:
         prompt = str(step.get("prompt") or "").strip()
         if not prompt:
             raise ValueError(f"Workflow step {index} is missing prompt")
-        normalized.append({"name": name[:200], "prompt": prompt[:50000]})
+        role = str(step.get("role") or "builder").strip().lower()[:64]
+        model_profile = step.get("model_profile")
+        if model_profile is not None:
+            model_profile = str(model_profile).strip()[:100] or None
+        max_attempts = max(1, min(int(step.get("max_attempts", 1)), 10))
+        normalized.append(
+            {
+                "name": name[:200],
+                "prompt": prompt[:50000],
+                "role": role,
+                "model_profile": model_profile,
+                "max_attempts": max_attempts,
+                "browser_required": bool(step.get("browser_required", False)),
+            }
+        )
     return normalized
 
 
-def render_step_prompt(template: str, *, input_text: str, previous_output: str, step_index: int) -> str:
+def render_step_prompt(
+    template: str, *, input_text: str, previous_output: str, step_index: int
+) -> str:
     return (
         template.replace("{{input}}", input_text)
         .replace("{{previous_output}}", previous_output)
@@ -34,7 +50,9 @@ def render_step_prompt(template: str, *, input_text: str, previous_output: str, 
     )
 
 
-async def recover_stale_runs(session: AsyncSession, *, stale_after_seconds: int = 900) -> list[str]:
+async def recover_stale_runs(
+    session: AsyncSession, *, stale_after_seconds: int = 900
+) -> list[str]:
     cutoff = utcnow() - timedelta(seconds=stale_after_seconds)
     result = await session.scalars(
         select(WorkflowRun).where(
@@ -50,7 +68,9 @@ async def recover_stale_runs(session: AsyncSession, *, stale_after_seconds: int 
     return recovered
 
 
-async def get_run_with_workflow(session: AsyncSession, run_id: str) -> tuple[WorkflowRun | None, Workflow | None]:
+async def get_run_with_workflow(
+    session: AsyncSession, run_id: str
+) -> tuple[WorkflowRun | None, Workflow | None]:
     run = await session.get(WorkflowRun, run_id)
     if run is None:
         return None, None
