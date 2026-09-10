@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -192,6 +193,7 @@ class AppBuilderCreate(BaseModel):
     requirements: str = Field(min_length=20, max_length=100000)
     name: str = Field(default="AI App Builder", min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
+    mode: Literal["app", "website"] = "app"
 
 
 class AppBuilderResponse(BaseModel):
@@ -199,6 +201,7 @@ class AppBuilderResponse(BaseModel):
     run_id: str
     status: str
     workspace: str
+    mode: Literal["app", "website"]
 
 
 class WorkflowRunCreate(BaseModel):
