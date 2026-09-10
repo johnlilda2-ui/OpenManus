@@ -165,6 +165,10 @@ class KnowledgeResponse(BaseModel):
 class WorkflowStepSpec(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=50000)
+    role: str = Field(default="builder", min_length=1, max_length=64)
+    model_profile: str | None = Field(default=None, max_length=100)
+    max_attempts: int = Field(default=1, ge=1, le=10)
+    browser_required: bool = False
 
 
 class WorkflowCreate(BaseModel):
@@ -182,6 +186,17 @@ class WorkflowResponse(BaseModel):
     steps: list[WorkflowStepSpec]
     created_at: datetime
     updated_at: datetime
+
+
+class AppBuilderCreate(BaseModel):
+    requirements: str = Field(min_length=20, max_length=100000)
+    name: str = Field(default="AI App Builder", min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
+
+
+class AppBuilderResponse(BaseModel):
+    workflow: WorkflowResponse
+    workspace: str
 
 
 class WorkflowRunCreate(BaseModel):
