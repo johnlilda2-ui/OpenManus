@@ -37,7 +37,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: ${{ github.workspace }}
+      PYTHONPATH: ""
       CI: "true"
       OPENMANUS_ENV: development
       OPENMANUS_AUTO_CREATE_DB: "false"
@@ -77,8 +77,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e . --no-deps
-      - name: Verify platform package import
-        run: python -c "import platform_core; print(platform_core.__file__)"
+      - name: Verify installed package imports
+        working-directory: /tmp
+        env:
+          PYTHONPATH: ""
+        run: python -c "import platform_core, alembic.config; print(platform_core.__file__); print(alembic.config.__file__)"
       - name: Syntax check
         run: python -m compileall -q app platform_core alembic
       - name: Apply migrations
