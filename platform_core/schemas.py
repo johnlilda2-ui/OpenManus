@@ -204,6 +204,41 @@ class AppBuilderResponse(BaseModel):
     mode: Literal["app", "website"]
 
 
+class WebsiteIterationCreate(BaseModel):
+    section_id: str = Field(min_length=1, max_length=120)
+    instruction: str = Field(min_length=5, max_length=10000)
+
+
+class WebsiteSectionResponse(BaseModel):
+    section_id: str
+    page: str
+    name: str
+    anchor: str | None = None
+    selector: str | None = None
+    description: str | None = None
+    sort_order: int = 0
+
+
+class WebsiteExperienceResponse(BaseModel):
+    mode: Literal["website"] = "website"
+    run_id: str
+    status: str
+    workspace: str
+    sections: list[WebsiteSectionResponse] = Field(default_factory=list)
+    design_system: dict = Field(default_factory=dict)
+    assets: list[dict] = Field(default_factory=list)
+    visual_score: float | None = None
+
+
+class VisualScoreResponse(BaseModel):
+    run_id: str
+    status: str
+    score: float | None
+    baseline_hash: str | None = None
+    current_hash: str | None = None
+    url: str | None = None
+
+
 class WorkflowRunCreate(BaseModel):
     input: str = Field(min_length=1, max_length=50000)
 
