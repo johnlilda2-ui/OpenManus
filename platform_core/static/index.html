@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenManus Operational Console</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1120px;margin:0 auto;padding:24px;background:#f6f7f9;color:#171717}button,input,textarea{font:inherit;padding:9px;border:1px solid #ccc;border-radius:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:300px 1fr;gap:18px}.card{background:white;padding:18px;border-radius:12px;box-shadow:0 1px 4px #0001;margin-bottom:16px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{min-width:0}.list button{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}.muted{color:#666}.log{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:8px;min-height:120px;max-height:360px;overflow:auto}.approval,.builder-run{border:1px solid #ddd;padding:10px;border-radius:8px;margin:8px 0}.danger{color:#a00}.pill{display:inline-block;padding:2px 8px;border-radius:99px;background:#eee}.phase{padding:6px 8px;margin:4px 0;border-radius:7px;background:#f3f4f6}.phase.done{background:#e9f7ef}.phase.running{background:#fff6db}.phase.failed{background:#fdecec}.preview{padding:10px;border:1px solid #ddd;border-radius:8px;background:#f8fbff}.preview a{font-weight:600}@media(max-width:760px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>OpenManus Operational Console</h1>
+<p class="muted">Agent tasks, durable workflows, approvals, memory, usage, and full-stack App Builder.</p>
+<div id="auth" class="card">
+  <div class="row"><input id="email" placeholder="Email"><input id="password" type="password" placeholder="Password"></div>
+  <div class="row" style="margin-top:8px"><button onclick="auth('register')">Register</button><button onclick="auth('login')">Login</button></div>
+  <p id="authmsg" class="muted"></p>
+</div>
+<div id="app" class="hidden">
+<div class="grid">
+<aside>
+  <div class="card"><h3>Projects</h3><div class="row"><input id="projectName" placeholder="Project name"><button onclick="createProject()">+</button></div><div id="projects" class="list"></div></div>
+  <div class="card"><h3>Conversation</h3><div class="row"><input id="conversationTitle" placeholder="Conversation title"><button onclick="createConversation()">+</button></div><div id="conversations" class="list"></div></div>
+  <div class="card"><h3>Usage</h3><div id="usage" class="muted">Select a project.</div></div>
+  <div class="card"><h3>Approvals</h3><div id="approvals" class="muted">Select a project.</div></div>
+</aside>
+<main>
+  <div class="card"><h3 id="activeTitle">Select a project</h3><textarea id="prompt" rows="5" style="width:100%" placeholder="Give OpenManus a task..."></textarea><div class="row" style="margin-top:8px"><button onclick="runTask()">Run task</button><button onclick="refreshAll()">Refresh</button></div></div>
+
+  <div class="card">
+    <h3>AI App Builder</h3>
+    <p class="muted">Describe the application you want. OpenManus will plan, build, run, preview, test, visually review, repair, re-test, and package it.</p>
+    <input id="builderName" value="AI App Builder" placeholder="Application name" style="width:100%;box-sizing:border-box">
+    <textarea id="builderRequirements" rows="8" style="width:100%;box-sizing:border-box;margin-top:8px" placeholder="Example: Build a responsive SaaS dashboard with authentication, a PostgreSQL API, a React/Tailwind frontend, charts, search, and a polished mobile experience."></textarea>
+    <div class="row" style="margin-top:8px"><button onclick="startBuilder()">Build application</button><button onclick="refreshBuilderRuns()">Refresh builds</button></div>
+    <div id="builderPreview" class="preview" style="margin-top:12px">No live preview.</div>
+    <div id="builderRuns" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card"><h3>Tasks</h3><div id="tasks"></div></div>
+  <div class="card"><h3>Live events</h3><div id="log" class="log">No task selected.</div></div>
+</main>
+</div></div>
+<script>
+const state={token:localStorage.getItem('om_token')||'',project:null,conversation:null,builderRun:null};
+const $=id=>document.getElementById(id);
+async function api(path,opts={}){opts.headers={...(opts.headers||{}),...(state.token?{Authorization:'Bearer '+state.token}:{})};if(opts.body&&typeof opts.body!=='string'){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)}const r=await fetch(path,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
+async function auth(kind){try{const data=await api('/v1/auth/'+kind,{method:'POST',body:{email:$('email').value,password:$('password').value}});state.token=data.access_token;localStorage.setItem('om_token',state.token);$('auth').classList.add('hidden');$('app').classList.remove('hidden');await refreshProjects()}catch(e){$('authmsg').textContent=e.message}}
+async function refreshProjects(){const p=await api('/v1/projects');$('projects').innerHTML=p.map(x=>`<button onclick="selectProject('${x.id}','${esc(x.name)}')">${esc(x.name)}</button>`).join('');if(state.project){const current=p.find(x=>x.id===state.project);if(current)await selectProject(current.id,current.name)}}
+async function createProject(){const name=$('projectName').value.trim();if(!name)return;const p=await api('/v1/projects',{method:'POST',body:{name}});$('projectName').value='';await refreshProjects();selectProject(p.id,p.name)}
+async function selectProject(id,name){state.project=id;state.conversation=null;$('activeTitle').textContent=name;await Promise.all([refreshConversations(),refreshTasks(),refreshUsage(),refreshApprovals(),refreshBuilderRuns()])}
+async function refreshConversations(){if(!state.project)return;const c=await api('/v1/projects/'+state.project+'/conversations');$('conversations').innerHTML=c.map(x=>`<button onclick="selectConversation('${x.id}','${esc(x.title)}')">${esc(x.title)}</button>`).join('')}
+async function createConversation(){if(!state.project)return;const title=$('conversationTitle').value.trim()||'New conversation';const c=await api('/v1/projects/'+state.project+'/conversations',{method:'POST',body:{title}});$('conversationTitle').value='';state.conversation=c.id;await refreshConversations()}
+async function selectConversation(id,title){state.conversation=id;$('activeTitle').textContent=title;await refreshTasks()}
+async function refreshTasks(){if(!state.project)return;const t=await api('/v1/projects/'+state.project+'/tasks');$('tasks').innerHTML=t.map(x=>`<div style="padding:8px 0;border-bottom:1px solid #eee"><span class="pill">${esc(x.status)}</span> — ${esc(x.prompt.slice(0,140))} <button onclick="watchTask('${x.id}')">Watch</button></div>`).join('')}
+async function refreshUsage(){try{const [u,q]=await Promise.all([api('/v1/projects/'+state.project+'/usage'),api('/v1/projects/'+state.project+'/quota')]);$('usage').innerHTML=`<b>${u.tokens.toLocaleString()}</b> / ${q.monthly_token_limit.toLocaleString()} tokens<br><b>${u.tasks}</b> / ${q.monthly_task_limit.toLocaleString()} tasks<br><b>${u.concurrent}</b> / ${q.max_concurrent_tasks} active`;}catch(e){$('usage').textContent=e.message}}
+async function refreshApprovals(){try{const a=await api('/v1/projects/'+state.project+'/approvals');const pending=a.filter(x=>x.status==='pending');$('approvals').innerHTML=pending.length?pending.map(x=>`<div class="approval"><b>${esc(x.tool_name)}</b><br>${esc(x.reason)}<div class="row" style="margin-top:6px"><button onclick="decideApproval('${x.id}','approve')">Approve</button><button onclick="decideApproval('${x.id}','deny')">Deny</button></div></div>`).join(''):'No pending approvals.';}catch(e){$('approvals').textContent=e.message}}
+async function decideApproval(id,action){try{await api('/v1/approvals/'+id+'/'+action,{method:'POST'});await refreshApprovals();await refreshTasks();await refreshBuilderRuns()}catch(e){$('log').textContent=e.message}}
+async function runTask(){if(!state.conversation){await createConversation()}if(!state.conversation)return;const prompt=$('prompt').value.trim();if(!prompt)return;try{const t=await api('/v1/conversations/'+state.conversation+'/tasks',{method:'POST',body:{prompt}});$('prompt').value='';await refreshTasks();await refreshUsage();watchTask(t.id)}catch(e){$('log').textContent=e.message}}
+async function watchTask(id){$('log').textContent='Connecting to task '+id+'...';try{const r=await fetch('/v1/tasks/'+id+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data)$('log').textContent+='\n'+data}}}catch(e){$('log').textContent+='\n'+e.message}finally{await refreshAll()}}
+async function startBuilder(){if(!state.project)return;const requirements=$('builderRequirements').value.trim();if(requirements.length<20){$('log').textContent='Please describe the application in at least 20 characters.';return}try{const run=await api('/v1/projects/'+state.project+'/app-builder',{method:'POST',body:{requirements,name:$('builderName').value.trim()||'AI App Builder'}});state.builderRun=run.run_id;await refreshBuilderRuns();watchBuilder(run.run_id)}catch(e){$('log').textContent=e.message}}
+async function refreshBuilderRuns(){if(!state.project)return;try{const runs=await api('/v1/projects/'+state.project+'/app-builder/runs');$('builderRuns').innerHTML=runs.length?runs.map(r=>`<div class="builder-run"><div><span class="pill">${esc(r.status)}</span> — ${esc(r.id.slice(0,12))}</div><div class="muted">Step ${r.current_step}</div>${r.output?`<div style="margin-top:6px">${renderText(r.output.slice(-900))}</div>`:''}<div class="row" style="margin-top:6px"><button onclick="watchBuilder('${r.id}')">Watch</button>${r.status==='builder_queued'||r.status==='builder_running'?`<button onclick="cancelBuilder('${r.id}')">Cancel</button>`:''}${r.status==='builder_completed'?`<button onclick="openBuilderArtifact('${r.id}')">Download application.zip</button>`:''}</div></div>`).join(''):'No App Builder runs yet.';if(runs.length){const active=runs.find(r=>r.id===state.builderRun)||runs[0];await refreshBuilderPreview(active.id)}}catch(e){$('builderRuns').textContent=e.message}}
+async function refreshBuilderPreview(runId){try{const p=await api('/v1/app-builder/runs/'+runId+'/preview');if(p.url){$('builderPreview').innerHTML=`Live preview: <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open preview ↗</a><div class="muted">Detected during: ${esc(p.step||'builder phase')}</div>`}else{$('builderPreview').textContent='No live preview is available yet. The sandbox preview is created during the Run and Preview phase.'}}catch(e){$('builderPreview').textContent='Preview status unavailable.'}}
+async function watchBuilder(runId){state.builderRun=runId;$('log').textContent='Connecting to App Builder '+runId+'...';await refreshBuilderPreview(runId);try{const r=await fetch('/v1/app-builder/runs/'+runId+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data){$('log').textContent+='\n'+data;try{const parsed=JSON.parse(data);renderBuilderProgress(parsed);if(parsed.kind&&parsed.kind.startsWith('builder.'))await refreshBuilderPreview(runId)}catch(_){}}}}}catch(e){$('log').textContent+='\n'+e.message}finally{await refreshBuilderRuns();await refreshUsage()}}
+function renderBuilderProgress(event){if(event.kind==='builder.step_started')$('log').textContent+=`\nPHASE ${event.payload.step_index+1}: ${event.payload.name} [${event.payload.role}/${event.payload.model_profile}]`;if(event.kind==='builder.step_completed')$('log').textContent+=`\nCOMPLETED PHASE ${event.payload.step_index+1}`;if(event.kind==='builder.artifact_created')$('log').textContent+=`\nARTIFACT READY: ${event.payload.download_url}`;if(event.kind==='builder.failed')$('log').textContent+=`\nBUILDER FAILED: ${event.payload.error||''}`;}
+async function cancelBuilder(id){try{await api('/v1/app-builder/runs/'+id+'/cancel',{method:'POST'});await refreshBuilderRuns()}catch(e){$('log').textContent=e.message}}
+async function openBuilderArtifact(id){try{const artifact=await api('/v1/app-builder/runs/'+id+'/artifact');window.open(artifact.download_url,'_blank','noopener');$('log').textContent='Opening '+artifact.filename+'...'}catch(e){$('log').textContent=e.message}}
+async function refreshAll(){if(!state.project)return;await Promise.all([refreshTasks(),refreshUsage(),refreshApprovals(),refreshBuilderRuns()])}
+function renderText(s){return esc(s).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+if(state.token){$('auth').classList.add('hidden');$('app').classList.remove('hidden');refreshProjects().catch(()=>{localStorage.removeItem('om_token');location.reload()})}
+</script>
+</body></html>

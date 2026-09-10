@@ -1,4 +1,4 @@
-pydantic~=2.10.6
+pydantic>=2.13.4,<3
 openai~=1.66.3
 tenacity~=9.0.0
 pyyaml~=6.0.2
@@ -21,7 +21,6 @@ baidusearch~=1.0.3
 duckduckgo_search~=7.5.3
 
 aiofiles~=24.1.0
-pydantic_core~=2.27.2
 colorama~=0.4.6
 playwright~=1.51.0
 
@@ -34,6 +33,7 @@ httpx>=0.27.0
 tomli>=2.0.0
 
 boto3~=1.37.18
+daytona==0.210.0
 
 requests~=2.32.3
 beautifulsoup4~=4.13.3
@@ -41,3 +41,12 @@ crawl4ai~=0.6.3
 
 huggingface-hub~=0.29.2
 setuptools~=75.8.0
+
+# OpenManus Operational Platform
+SQLAlchemy>=2.0,<3
+asyncpg>=0.29,<1
+aiosqlite>=0.20,<1
+Alembic>=1.14,<2
+PyJWT>=2.8,<3
+pwdlib[argon2]>=0.2,<1
+redis>=5,<7
