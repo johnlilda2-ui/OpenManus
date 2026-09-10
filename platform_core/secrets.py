@@ -9,18 +9,16 @@ class SecretNotFound(RuntimeError):
 
 
 def get_secret(name: str, *, required: bool = True) -> str | None:
-    """Resolve a secret from Docker/Kubernetes secret files, then environment.
+    """Resolve a secret without persisting or logging its value."""
+    if name.startswith("/"):
+        candidates = [Path(name)]
+        normalized = Path(name).name
+        env_name = f"OPENMANUS_SECRET_{normalized.upper().replace('-', '_')}"
+    else:
+        normalized = name.removeprefix(settings.api_key_secret_prefix).strip()
+        candidates = [Path("/run/secrets") / normalized, Path("/run/secrets") / normalized.lower()]
+        env_name = f"OPENMANUS_SECRET_{normalized.upper().replace('-', '_')}"
 
-    Never writes secrets to the database or logs them. A config value like
-    `secret://openai_api_key` can be resolved through this function.
-    """
-    normalized = name.removeprefix(settings.api_key_secret_prefix).strip()
-    candidates = []
-    if normalized:
-        candidates.append(Path("/run/secrets") / normalized)
-        candidates.append(Path("/run/secrets") / normalized.lower())
-        candidates.append(Path("/run/secrets") / normalized.upper())
-    env_name = f"OPENMANUS_SECRET_{normalized.upper().replace('-', '_')}"
     value = os.getenv(env_name)
     if value:
         return value.strip()
