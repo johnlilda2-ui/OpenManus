@@ -22,6 +22,37 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: openmanus
+          POSTGRES_USER: openmanus
+          POSTGRES_PASSWORD: openmanus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openmanus -d openmanus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      CI: "true"
+      OPENMANUS_ENV: development
+      OPENMANUS_AUTO_CREATE_DB: "false"
+      DATABASE_URL: postgresql+asyncpg://openmanus:openmanus@127.0.0.1:5432/openmanus
+      REDIS_URL: redis://127.0.0.1:6379/0
+      OPENMANUS_JWT_SECRET: ci-only-secret
+      OPENMANUS_SANDBOX_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,6 +61,8 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Syntax check
-        run: python -m compileall -q platform_core alembic
+        run: python -m compileall -q app platform_core alembic
+      - name: Apply migrations
+        run: alembic upgrade head
       - name: Platform tests
         run: pytest -q tests/platform_core
