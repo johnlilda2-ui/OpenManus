@@ -56,8 +56,8 @@ class ProjectPolicy(Base):
     __tablename__ = "project_policies"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
-    allowed_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["terminate", "planning", "str_replace_editor", "ask_human", "web_search", "crawl4ai", "create_chat_completion", "browser_*"])
-    denied_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["bash", "python_execute", "computer_use*", "sandbox*", "docker*"])
+    allowed_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["terminate", "planning", "python_execute", "str_replace_editor", "ask_human", "web_search", "crawl4ai", "create_chat_completion", "browser_*", "sandbox*"])
+    denied_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["bash", "computer_use*", "docker*"])
     approval_required_patterns: Mapped[list[str]] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
