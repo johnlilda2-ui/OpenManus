@@ -16,7 +16,7 @@ from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import WebsiteExperienceResponse, WebsiteIterationCreate, WebsiteSectionResponse, VisualScoreResponse
 from platform_core.usage import check_quota
 from platform_core.website_iteration import build_website_section_iteration_steps
-from platform_core.website_manifest import extract_visual_score, extract_website_manifests
+from platform_core.website_manifest import extract_visual_score, extract_website_manifests, extract_website_research
 from platform_core.workflows import normalize_steps
 from platform_core.website_models import WebsiteAsset, WebsiteDesignSystem, WebsiteIteration, WebsiteSection, WebsiteVisualSnapshot
 
@@ -25,7 +25,7 @@ def _is_website_workflow(workflow: Workflow | None) -> bool:
     if workflow is None or not workflow.steps_json:
         return False
     first_name = str(workflow.steps_json[0].get("name", "")).lower()
-    return "website strategy" in first_name or "section iteration" in first_name
+    return "website strategy" in first_name or "reference research" in first_name or "section iteration" in first_name
 
 
 async def _access(session: AsyncSession, project_id: str, user: User, minimum_role: str) -> Project:
@@ -119,7 +119,7 @@ async def _sync_manifest_models(
             "usage": item.get("usage"),
             "width": item.get("width"),
             "height": item.get("height"),
-            "metadata_json": {},
+            "metadata_json": {"license_or_source": item.get("license_or_source")},
         }
         if row is None:
             session.add(WebsiteAsset(project_id=run.project_id, asset_id=item["id"], **values))
@@ -141,9 +141,11 @@ def register(router) -> None:
         session: AsyncSession = Depends(get_db),
     ) -> WebsiteExperienceResponse:
         run, _, steps = await _run_and_steps(session, run_id, user)
-        design_system, sections, assets = extract_website_manifests(_step_results(steps))
+        results = _step_results(steps)
+        design_system, sections, assets = extract_website_manifests(results)
+        research = extract_website_research(results)
         await _sync_manifest_models(session, run, design_system, sections, assets)
-        visual = extract_visual_score(_step_results(steps))
+        visual = extract_visual_score(results)
         score = visual.get("score")
         if score is not None and visual.get("current_hash"):
             session.add(
@@ -165,6 +167,7 @@ def register(router) -> None:
             sections=[WebsiteSectionResponse(**item) for item in sections],
             design_system=design_system,
             assets=assets,
+            research=research,
             visual_score=score,
         )
 
