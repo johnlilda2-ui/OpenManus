@@ -17,7 +17,7 @@ from platform_core.usage import check_quota
 from platform_core.website_iteration import build_website_section_iteration_steps
 from platform_core.website_manifest import extract_visual_score, extract_website_manifests
 from platform_core.workflows import normalize_steps
-from platform_core.website_models import WebsiteIteration
+from platform_core.website_models import WebsiteAsset, WebsiteDesignSystem, WebsiteIteration, WebsiteSection, WebsiteVisualSnapshot
 
 
 def _is_website_workflow(workflow: Workflow | None) -> bool:
@@ -53,6 +53,80 @@ def _step_results(steps: list[WorkflowStepRun]) -> list[str]:
     return [step.result or "" for step in steps if step.result]
 
 
+async def _sync_manifest_models(
+    session: AsyncSession,
+    run: WorkflowRun,
+    design_system: dict,
+    sections: list[dict],
+    assets: list[dict],
+) -> None:
+    system = await session.scalar(select(WebsiteDesignSystem).where(WebsiteDesignSystem.project_id == run.project_id))
+    if system is None:
+        system = WebsiteDesignSystem(
+            project_id=run.project_id,
+            source_run_id=run.id,
+            version=1,
+            tokens=design_system.get("tokens", {}),
+            components=design_system.get("components", {}),
+            guidelines=design_system.get("guidelines", {}),
+        )
+        session.add(system)
+    else:
+        system.source_run_id = run.id
+        system.version += 1
+        system.tokens = design_system.get("tokens", {})
+        system.components = design_system.get("components", {})
+        system.guidelines = design_system.get("guidelines", {})
+
+    for item in sections:
+        row = await session.scalar(
+            select(WebsiteSection).where(
+                WebsiteSection.project_id == run.project_id,
+                WebsiteSection.section_id == item["section_id"],
+            )
+        )
+        values = dict(
+            source_run_id=run.id,
+            page=item["page"],
+            name=item["name"],
+            anchor=item.get("anchor"),
+            selector=item.get("selector"),
+            description=item.get("description"),
+            sort_order=item.get("sort_order", 0),
+        )
+        if row is None:
+            session.add(WebsiteSection(project_id=run.project_id, section_id=item["section_id"], **values))
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+
+    for item in assets:
+        row = await session.scalar(
+            select(WebsiteAsset).where(
+                WebsiteAsset.project_id == run.project_id,
+                WebsiteAsset.asset_id == item["id"],
+            )
+        )
+        values = dict(
+            source_run_id=run.id,
+            kind=item.get("kind") or "image",
+            name=item.get("name") or item["id"],
+            path=item.get("path_or_url"),
+            source_url=item.get("path_or_url") if str(item.get("path_or_url") or "").startswith("http") else None,
+            alt_text=item.get("alt_text"),
+            usage=item.get("usage"),
+            width=item.get("width"),
+            height=item.get("height"),
+            metadata_json={},
+        )
+        if row is None:
+            session.add(WebsiteAsset(project_id=run.project_id, asset_id=item["id"], **values))
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+    await session.flush()
+
+
 def register(router) -> None:
     @router.get("/v1/app-builder/runs/{run_id}/website-experience", response_model=WebsiteExperienceResponse)
     async def website_experience(
@@ -62,7 +136,22 @@ def register(router) -> None:
     ) -> WebsiteExperienceResponse:
         run, _, steps = await _run_and_steps(session, run_id, user)
         design_system, sections, assets = extract_website_manifests(_step_results(steps))
+        await _sync_manifest_models(session, run, design_system, sections, assets)
         visual = extract_visual_score(_step_results(steps))
+        score = visual.get("score")
+        if score is not None and visual.get("current_hash"):
+            session.add(
+                WebsiteVisualSnapshot(
+                    project_id=run.project_id,
+                    run_id=run.id,
+                    label="website-reverification",
+                    url=visual.get("url"),
+                    visual_hash=str(visual.get("current_hash")),
+                    diff_score=float(score),
+                    metadata_json={"baseline_hash": visual.get("baseline_hash")},
+                )
+            )
+        await session.commit()
         return WebsiteExperienceResponse(
             run_id=run.id,
             status=run.status,
@@ -70,7 +159,7 @@ def register(router) -> None:
             sections=[WebsiteSectionResponse(**item) for item in sections],
             design_system=design_system,
             assets=assets,
-            visual_score=visual.get("score"),
+            visual_score=score,
         )
 
     @router.get("/v1/app-builder/runs/{run_id}/website-sections", response_model=list[WebsiteSectionResponse])
@@ -79,8 +168,10 @@ def register(router) -> None:
         user: User = Depends(get_current_user),
         session: AsyncSession = Depends(get_db),
     ) -> list[WebsiteSectionResponse]:
-        _, _, steps = await _run_and_steps(session, run_id, user)
-        _, sections, _ = extract_website_manifests(_step_results(steps))
+        run, _, steps = await _run_and_steps(session, run_id, user)
+        design_system, sections, assets = extract_website_manifests(_step_results(steps))
+        await _sync_manifest_models(session, run, design_system, sections, assets)
+        await session.commit()
         return [WebsiteSectionResponse(**item) for item in sections]
 
     @router.get("/v1/app-builder/runs/{run_id}/visual-score", response_model=VisualScoreResponse)
@@ -108,11 +199,16 @@ def register(router) -> None:
         user: User = Depends(get_current_user),
         session: AsyncSession = Depends(get_db),
     ) -> dict:
-        parent_run, _, _ = await _run_and_steps(session, run_id, user)
+        parent_run, _, steps = await _run_and_steps(session, run_id, user)
         if parent_run.status != "builder_completed":
             raise HTTPException(status_code=409, detail="Website must be completed before section iteration")
         if payload.section_id != section_id:
             raise HTTPException(status_code=400, detail="section_id in path and body must match")
+        _, sections, _ = extract_website_manifests(_step_results(steps))
+        valid_ids = {item["section_id"] for item in sections}
+        if section_id not in valid_ids:
+            raise HTTPException(status_code=404, detail="Website section was not found in the latest manifest")
+
         active = await session.scalar(
             select(WorkflowRun.id).where(
                 WorkflowRun.project_id == parent_run.project_id,
@@ -124,12 +220,15 @@ def register(router) -> None:
         allowed, reason, _ = await check_quota(session, parent_run.project_id, payload.instruction)
         if not allowed:
             raise HTTPException(status_code=429, detail=reason)
+
         workflow = Workflow(
             owner_id=user.id,
             project_id=parent_run.project_id,
             name=f"Website section iteration: {section_id}",
             description="Targeted Website Builder iteration",
-            steps_json=normalize_steps(build_website_section_iteration_steps(parent_run.project_id, section_id, payload.instruction)),
+            steps_json=normalize_steps(
+                build_website_section_iteration_steps(parent_run.project_id, section_id, payload.instruction)
+            ),
         )
         session.add(workflow)
         await session.flush()
@@ -155,7 +254,7 @@ def register(router) -> None:
             session,
             child_run.id,
             "builder.iteration_queued",
-            {"parent_run_id": parent_run.id, "section_id": section_id, "instruction": payload.instruction.strip()},
+            {"parent_run_id": parent_run.id, "section_id": section_id},
         )
         await add_audit_event(
             session,
@@ -167,11 +266,22 @@ def register(router) -> None:
         await session.commit()
         try:
             await enqueue_app_builder(child_run.id)
-        except Exception:
-            await session.rollback()
+        except Exception as exc:
             async with session.begin():
-                child_run.status = "builder_queued"
-            raise
+                await add_workflow_event(
+                    session,
+                    child_run.id,
+                    "builder.queue_deferred",
+                    {"status": "builder_queued", "reason": str(exc)[:1000]},
+                )
+            return {
+                "iteration_id": iteration.id,
+                "run_id": child_run.id,
+                "parent_run_id": parent_run.id,
+                "section_id": section_id,
+                "status": "builder_queued",
+                "queue_deferred": True,
+            }
         return {
             "iteration_id": iteration.id,
             "run_id": child_run.id,
