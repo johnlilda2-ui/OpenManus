@@ -4,22 +4,11 @@ Website Builder is a specialized mode of the OpenManus AI Builder for production
 
 ## What it builds
 
-The mode is optimized for:
-
-- business and company websites
-- landing pages and marketing sites
-- portfolios
-- blogs and content sites
-- documentation and informational sites
-- responsive multi-page frontend experiences
-
-It can also add a backend/API when the requirements need dynamic behavior.
+The mode is optimized for business and company websites, landing pages and marketing sites, portfolios, blogs and content sites, documentation, and responsive multi-page frontend experiences. It can also add a backend/API when dynamic behavior is required.
 
 ## Autonomous workflow
 
-Website Builder uses the same durable worker, policy layer, isolated sandbox, artifact store and model router as the general App Builder, with additional website-specific design and iteration state.
-
-The workflow is:
+Website Builder uses the same durable worker, policy layer, isolated sandbox, artifact store and model router as the general App Builder, with website-specific design and iteration state.
 
 1. Website strategy and information architecture
 2. Design system and page/section/asset manifest generation
@@ -34,39 +23,39 @@ The workflow is:
 11. Browser re-verification with visual similarity/diff scoring
 12. Final website security and release review
 
-The browser phases are fail-closed: unavailable browser tooling is reported as a failed verification rather than a fabricated pass.
+Browser phases fail closed: unavailable browser tooling is reported as failed verification rather than a fabricated pass.
 
 ## Design system
 
-The builder creates `DESIGN_SYSTEM.json` containing semantic color tokens, typography, spacing, radii, shadows, motion, responsive breakpoints, reusable component variants, and UI guidelines. Subsequent frontend and repair phases are instructed to preserve and reuse these tokens rather than introduce unrelated styles.
+The builder creates `DESIGN_SYSTEM.json` with semantic color tokens, typography, spacing, radii, shadows, motion, responsive breakpoints, reusable component variants, and UI guidelines. Subsequent implementation and repair phases are instructed to preserve and reuse those tokens.
 
 ## Section manifest
 
-The builder creates `SECTION_MANIFEST.json` with stable section IDs such as `home.hero` and `home.services`. Each major rendered section is expected to retain its stable ID in the DOM. The platform stores the parsed section metadata so individual sections can be targeted later without rebuilding the entire site.
+The builder creates `SECTION_MANIFEST.json` with stable section IDs such as `home.hero` and `home.services`. Major rendered sections are expected to retain their stable ID in the DOM. The platform persists section metadata so one selected section can be regenerated without rebuilding unrelated sections.
 
 ## Asset manifest
 
-The builder creates `ASSET_MANIFEST.json` describing planned images, icons and media, including paths or URLs, alt text, dimensions when known, and intended usage. Missing user assets are recorded as explicit specifications rather than invented remote URLs. The parsed asset metadata is persisted with the project.
+The builder creates `ASSET_MANIFEST.json` describing planned images, icons and media, including path/URL, alt text, dimensions when known, and intended usage. Missing user assets are recorded as explicit specifications rather than invented remote URLs. Parsed asset metadata is persisted with the project.
 
 ## Live preview and visual verification
 
-The builder creates `APP_PREVIEW.json`, runs the website only inside the isolated sandbox, health-checks it, and obtains a browser-accessible preview URL through `sandbox_preview`.
+The builder creates `APP_PREVIEW.json`, runs the site only inside the isolated sandbox, health-checks it, and obtains a browser-accessible preview URL through `sandbox_preview`.
 
-Browser verification uses the sandbox browser and a deterministic screenshot hash. The final re-verification compares that hash against the recorded baseline and reports a `visual_diff_score`. This is a similarity signal for the captured screenshot, not a subjective claim that the website is aesthetically perfect.
+The sandbox browser now supports a `snapshot` action. It returns a deterministic average-hash and SHA-256 for the captured screenshot. Re-verification can compare the current visual hash against the baseline and report a `visual_diff_score`. This is a deterministic screenshot-similarity signal, not a subjective aesthetic score.
 
 ## Section-level iteration
 
-After a website run is complete, a specific section can be regenerated with:
+After a Website Builder run completes, a selected section can be regenerated with:
 
 `POST /v1/app-builder/runs/{run_id}/sections/{section_id}/iterate`
 
-The iteration workflow inspects the target section, changes only the necessary files, re-runs the preview, verifies the target section plus an unrelated section, performs repair when needed, and re-verifies the result.
+The iteration workflow inspects the target section, changes only the necessary files, re-runs the preview, verifies the target section plus an unrelated section, repairs failures, and re-verifies the result.
 
-The dedicated workspace is available at:
+A dedicated authenticated workspace is available at:
 
 `GET /website-builder`
 
-It displays the live preview, parsed design system, assets, stable sections and per-section **Improve section** actions.
+It displays the live preview, design system, asset manifest, stable sections and per-section **Improve section** actions. During an iteration, the parent website remains the source of truth for the editor while the child run streams its progress.
 
 ## API
 
@@ -89,19 +78,8 @@ The existing App Builder endpoint also supports explicit `mode: "website"` for i
 
 ## Model routing
 
-Website Builder uses the logical roles already provided by the platform:
+Website Builder uses the existing logical roles: planner, builder, designer, tester, fixer, and reviewer. Assign different configured LLM profiles to those roles through the model-router configuration or `OPENMANUS_MODEL_*` environment overrides. No vendor credentials are stored in the repository.
 
-- planner
-- builder
-- designer
-- tester
-- fixer
-- reviewer
+## Delivery
 
-Assign different configured LLM profiles to those roles through the existing model-router configuration or `OPENMANUS_MODEL_*` environment overrides.
-
-No vendor credentials are stored in the repository.
-
-## Preview and delivery
-
-The final application is packaged as `application.zip` with the platform's existing artifact integrity metadata. External LLM credentials are required for real generation, and production sandbox/browser execution requires a configured isolated Daytona environment.
+The final site is packaged as `application.zip` with the platform's artifact integrity metadata. Real AI generation requires an LLM provider; production sandbox/browser execution requires an isolated Daytona environment.
