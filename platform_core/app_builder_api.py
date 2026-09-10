@@ -19,7 +19,7 @@ from platform_core.permissions import PermissionDenied, require_project_role
 from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import AppBuilderCreate, AppBuilderResponse, WorkflowEventResponse, WorkflowRunDetailResponse
 from platform_core.usage import check_quota
-from platform_core.workflows import get_or_create_step_run, normalize_steps
+from platform_core.workflows import normalize_steps
 
 router = APIRouter()
 
@@ -32,11 +32,7 @@ async def project_access(session: AsyncSession, project_id: str, user: User, min
         raise HTTPException(status_code=404 if project is None else 403, detail=str(exc)) from exc
 
 
-@router.post(
-    "/v1/projects/{project_id}/app-builder",
-    response_model=AppBuilderResponse,
-    status_code=202,
-)
+@router.post("/v1/projects/{project_id}/app-builder", response_model=AppBuilderResponse, status_code=202)
 async def create_app_builder_run(
     project_id: str,
     payload: AppBuilderCreate,
@@ -98,7 +94,6 @@ async def create_app_builder_run(
             )
             await recovery_session.commit()
 
-    response_workflow = WorkflowRunDetailResponse.model_validate(run)
     return AppBuilderResponse(
         workflow={
             "id": workflow.id,
@@ -113,10 +108,7 @@ async def create_app_builder_run(
     )
 
 
-@router.get(
-    "/v1/projects/{project_id}/app-builder/runs",
-    response_model=list[WorkflowRunDetailResponse],
-)
+@router.get("/v1/projects/{project_id}/app-builder/runs", response_model=list[WorkflowRunDetailResponse])
 async def list_app_builder_runs(
     project_id: str,
     user: User = Depends(get_current_user),
@@ -127,18 +119,18 @@ async def list_app_builder_runs(
         select(WorkflowRun)
         .where(
             WorkflowRun.project_id == project.id,
-            WorkflowRun.status.in_(["builder_queued", "builder_running", "builder_completed", "builder_failed", "builder_cancelled"]),
+            WorkflowRun.status.in_([
+                "builder_queued",
+                "builder_running",
+                "builder_completed",
+                "builder_failed",
+                "builder_cancelled",
+            ]),
         )
         .order_by(WorkflowRun.created_at.desc())
         .limit(50)
     )
-    result = []
-    for run in runs.all():
-        steps = await session.scalars(
-            select(get_or_create_step_run.__annotations__.get("return", WorkflowEvent))
-        ) if False else None
-        result.append(WorkflowRunDetailResponse.model_validate(run))
-    return result
+    return [WorkflowRunDetailResponse.model_validate(run) for run in runs.all()]
 
 
 @router.get("/v1/app-builder/runs/{run_id}", response_model=WorkflowRunDetailResponse)
@@ -171,7 +163,13 @@ async def cancel_app_builder_run(
         run.status = "builder_cancelled"
         run.completed_at = datetime.now(timezone.utc)
         await add_workflow_event(session, run.id, "builder.cancelled", {"status": run.status})
-    await add_audit_event(session, "builder.cancel_requested", actor_user_id=user.id, project_id=run.project_id, metadata={"run_id": run.id})
+    await add_audit_event(
+        session,
+        "builder.cancel_requested",
+        actor_user_id=user.id,
+        project_id=run.project_id,
+        metadata={"run_id": run.id},
+    )
     await session.commit()
     return WorkflowRunDetailResponse.model_validate(run)
 
@@ -228,5 +226,9 @@ async def app_builder_events(
     return StreamingResponse(
         stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
