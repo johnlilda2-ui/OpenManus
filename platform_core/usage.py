@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_core.models import ProjectQuota, Task, UsageRecord
+from platform_core.models import ProjectQuota, Task, UsageRecord, WorkflowRun
 from platform_core.settings import settings
 
 
@@ -40,10 +40,44 @@ def month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
 
 async def current_usage(session: AsyncSession, project_id: str) -> dict[str, int]:
     start, end = month_bounds()
-    token_total = await session.scalar(select(func.coalesce(func.sum(UsageRecord.total_tokens), 0)).where(UsageRecord.project_id == project_id, UsageRecord.created_at >= start, UsageRecord.created_at <= end))
-    task_total = await session.scalar(select(func.count(Task.id)).where(Task.project_id == project_id, Task.created_at >= start, Task.created_at <= end))
-    running_total = await session.scalar(select(func.count(Task.id)).where(Task.project_id == project_id, Task.status.in_(["queued", "running", "awaiting_approval"])))
-    return {"tokens": int(token_total or 0), "tasks": int(task_total or 0), "concurrent": int(running_total or 0)}
+    token_total = await session.scalar(
+        select(func.coalesce(func.sum(UsageRecord.total_tokens), 0)).where(
+            UsageRecord.project_id == project_id,
+            UsageRecord.created_at >= start,
+            UsageRecord.created_at <= end,
+        )
+    )
+    task_total = await session.scalar(
+        select(func.count(Task.id)).where(
+            Task.project_id == project_id,
+            Task.created_at >= start,
+            Task.created_at <= end,
+        )
+    )
+    workflow_total = await session.scalar(
+        select(func.count(WorkflowRun.id)).where(
+            WorkflowRun.project_id == project_id,
+            WorkflowRun.created_at >= start,
+            WorkflowRun.created_at <= end,
+        )
+    )
+    running_tasks = await session.scalar(
+        select(func.count(Task.id)).where(
+            Task.project_id == project_id,
+            Task.status.in_(["queued", "running", "awaiting_approval"]),
+        )
+    )
+    running_workflows = await session.scalar(
+        select(func.count(WorkflowRun.id)).where(
+            WorkflowRun.project_id == project_id,
+            WorkflowRun.status.in_(["queued", "running"]),
+        )
+    )
+    return {
+        "tokens": int(token_total or 0),
+        "tasks": int(task_total or 0) + int(workflow_total or 0),
+        "concurrent": int(running_tasks or 0) + int(running_workflows or 0),
+    }
 
 
 async def check_quota(session: AsyncSession, project_id: str, prompt: str) -> tuple[bool, str, ProjectQuota]:
