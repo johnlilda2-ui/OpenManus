@@ -7,8 +7,9 @@ def build_website_section_iteration_steps(project_id: str, section_id: str, inst
 You are iterating one section of an existing production website in {workspace}.
 Target section ID: {section_id}
 User requested change: {instruction}
-Read SECTION_MANIFEST.json and DESIGN_SYSTEM.json first. Preserve all unrelated pages and sections.
+Read SECTION_MANIFEST.json, DESIGN_SYSTEM.json and WEBSITE_RESEARCH.md first. Preserve all unrelated pages and sections.
 Do not rewrite the entire website. Keep stable IDs, design tokens, accessibility, SEO and existing behavior intact.
+Use research references only for high-level inspiration. Do not copy proprietary text, images, logos, trademarks or exact layouts.
 """.strip()
     return [
         {
@@ -18,8 +19,8 @@ Do not rewrite the entire website. Keep stable IDs, design tokens, accessibility
 
 Locate the exact section in the current project using SECTION_MANIFEST.json and the codebase.
 Identify the smallest set of files/components/styles required to make the requested change.
-Create {workspace}/SECTION_ITERATION_PLAN.md with the target files, affected selectors/components,
-acceptance criteria, and explicit out-of-scope areas.""",
+Create {workspace}/SECTION_ITERATION_PLAN.md with target files, affected selectors/components,
+acceptance criteria, explicit out-of-scope areas, and any relevant design-system/research constraints.""",
             "max_attempts": 1,
             "browser_required": False,
         },
@@ -29,8 +30,9 @@ acceptance criteria, and explicit out-of-scope areas.""",
             "prompt": f"""{shared}
 
 Read SECTION_ITERATION_PLAN.md. Implement only the requested changes to section `{section_id}`.
-Use the existing design system. Keep the same section ID and preserve its page semantics, responsive
-behavior, links, forms and accessibility unless the request explicitly changes them. Do not touch unrelated sections.""",
+Use the existing design system and the research-informed design language already established for the site.
+Keep the same section ID and preserve its page semantics, responsive behavior, links, forms and accessibility
+unless the request explicitly changes them. Do not touch unrelated sections.""",
             "max_attempts": 2,
             "browser_required": False,
         },
@@ -41,7 +43,7 @@ behavior, links, forms and accessibility unless the request explicitly changes t
 
 Read APP_PREVIEW.json. Restart or reuse the preview only inside the isolated sandbox. Health-check the
 site and use sandbox_preview to obtain the browser-accessible URL. Confirm the target section is present
-on the expected route. Write {workspace}/ITERATION_PREVIEW_REPORT.md with the URL, route, and health result.""",
+on the expected route. Write {workspace}/ITERATION_PREVIEW_REPORT.md with URL, route, and health result.""",
             "max_attempts": 2,
             "browser_required": False,
         },
@@ -53,8 +55,9 @@ on the expected route. Write {workspace}/ITERATION_PREVIEW_REPORT.md with the UR
 Use sandbox_browser against the preview URL from ITERATION_PREVIEW_REPORT.md. Navigate directly to the
 page containing `{section_id}` and verify the requested change, responsive behavior, links/CTAs, visual
 hierarchy and accessibility basics. Also confirm at least one unrelated section remains unchanged.
-Call sandbox_browser with action=snapshot and record its `visual_hash` in {workspace}/ITERATION_BASELINE_OR_CURRENT.json.
-Write {workspace}/ITERATION_QA.md and end with exactly ITERATION_STATUS: PASS or ITERATION_STATUS: FAIL.""",
+Call sandbox_browser with action=snapshot and record its `visual_hash` plus URL/viewport in
+{workspace}/ITERATION_BASELINE_OR_CURRENT.json. Write {workspace}/ITERATION_QA.md and end with exactly
+ITERATION_STATUS: PASS or ITERATION_STATUS: FAIL.""",
             "max_attempts": 2,
             "browser_required": True,
         },
