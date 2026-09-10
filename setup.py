@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="openmanus",
-    version="0.3.0",
+    version="0.4.0",
     author="mannaandpoem and OpenManus Team",
     author_email="mannaandpoem@gmail.com",
     description="A versatile agent that can solve various tasks using multiple tools and an operational platform control plane",
@@ -42,6 +42,7 @@ setup(
         "pwdlib[argon2]>=0.2,<1",
         "redis>=5,<7",
         "boto3~=1.37.18",
+        "daytona==0.210.0",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
