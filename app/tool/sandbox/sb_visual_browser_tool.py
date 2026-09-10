@@ -105,9 +105,11 @@ class SandboxVisualBrowserTool(SandboxBrowserTool):
             payload = {
                 "visual_hash": current_hash,
                 "sha256": image_sha256(state.base64_image),
-                "visual_diff_score": hash_similarity(reference_hash, current_hash)
-                if reference_hash
-                else 100.0,
+                "visual_diff_score": (
+                    hash_similarity(reference_hash, current_hash)
+                    if reference_hash
+                    else 100.0
+                ),
                 "reference_hash": reference_hash,
                 "url": "",
             }
