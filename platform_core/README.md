@@ -1,64 +1,96 @@
 # OpenManus Operational Platform
 
-This layer adds a persistent control plane around the existing OpenManus agent engine without replacing the engine.
+This layer adds a persistent, governed control plane around the existing OpenManus agent engine without replacing the engine.
 
-## v0.3 capabilities
+## Hardened platform capabilities
 
 - JWT authentication with Argon2 password hashing.
-- Persistent projects, conversations, tasks and audit events.
-- Redis-backed workers with database recovery.
-- Project-scoped tool policies.
-- Approval requests for high-risk tool execution.
-- Host execution boundary that blocks Bash, Docker and computer-use tools unless separately isolated.
-- Durable user/project memory and project knowledge records.
-- Durable sequential workflows with persisted step runs and stale-run recovery.
-- Durable artifact storage using a local persistent volume or S3-compatible object storage.
-- Project quotas and token/cost accounting with configurable rates.
-- Vanilla HTML web console at `/`.
-- Alembic schema migrations.
+- Tenant membership with viewer/member/admin/owner roles.
+- Project-scoped tool policy with explicit deny, allow, and approval rules.
+- Durable approval requests and approve/deny endpoints.
+- Direct host Bash, Docker, and computer-use execution blocked by the platform boundary.
+- Production sandbox path using Daytona; the official Python SDK is pinned to `daytona==0.210.0` in this branch. Daytona documents its sandboxes as isolated execution environments. citeturn633941search3turn633941search1
+- Persistent projects, conversations, tasks, workflow runs and audit events.
+- Persistent user/project memory and project knowledge retrieval.
+- Durable sequential workflows with heartbeat recovery.
+- Durable artifacts on a persistent local volume or S3-compatible object storage.
+- Redis-backed API rate limiting with a stricter authentication limit.
+- Monthly task/token quotas and concurrent-task limits.
+- Provider-reported token usage captured from OpenManus LLM responses where the provider returns usage data; estimated accounting remains the fallback for paths without provider counters.
+- Alembic migrations with PostgreSQL CI coverage.
+- Web operational console at `/`.
 
-## Run
+## Development
 
-For local Docker development:
+```bash
+cp .env.platform.example .env
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn platform_core.api:app --reload
+```
+
+Run the worker separately:
+
+```bash
+python -m platform_core.worker
+```
+
+Or use the development compose stack:
 
 ```bash
 docker compose -f docker-compose.platform.yml up --build
 ```
 
-The compose stack runs PostgreSQL, Redis, migrations, the API and a dedicated OpenManus worker.
+## Production configuration
 
-The web console is available at `http://localhost:8000/` and API documentation at `http://localhost:8000/docs`.
+Production must use:
 
-For non-Docker development, set the environment variables from `.env.platform.example`, run `alembic upgrade head`, then start the API and worker separately.
+- `OPENMANUS_ENV=production`
+- `OPENMANUS_AUTO_CREATE_DB=false`
+- a mounted JWT secret file
+- `OPENMANUS_SANDBOX_ENABLED=true`
+- `OPENMANUS_SANDBOX_BACKEND=daytona`
+- Redis rate limiting with `OPENMANUS_RATE_LIMIT_FAIL_OPEN=false`
+- a persistent artifact store or S3-compatible object storage
+- a real PostgreSQL database
+- provider credentials supplied through mounted secrets rather than committed configuration values
+
+The production compose profile is provided as `docker-compose.production.yml`. It runs Alembic migrations before the API/worker and mounts separate JWT, LLM, and Daytona secrets.
+
+## Secret-backed provider configuration
+
+Use `secret://<name>` in `config/config.toml` for provider credentials, for example:
+
+```toml
+[llm]
+api_key = "secret://openmanus_llm_api_key"
+
+[daytona]
+daytona_api_key = "secret://openmanus_daytona_api_key"
+```
+
+The runtime resolves these values from mounted secret files or `OPENMANUS_SECRET_*` environment variables without writing the secret value to the platform database.
 
 ## Approval behavior
 
-A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails that task.
+A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails the task.
 
 Approval currently re-queues the task from its persisted prompt rather than checkpointing the exact in-memory agent state. Do not use approval-required patterns for non-idempotent side effects until checkpointed tool execution is added.
 
-## Execution boundary
-
-The platform blocks direct Bash, Docker and computer-use tools. Sandbox-pattern tools require `OPENMANUS_SANDBOX_ENABLED=true` and should be backed by an actual isolated sandbox service before public deployment. The default project policy is deliberately conservative.
-
-## Storage
-
-Artifacts are scoped to a project and owner. With `OPENMANUS_S3_BUCKET` configured, uploads go to the configured S3-compatible object store and API responses expose short-lived presigned download URLs. Without S3 configuration, files are stored under `OPENMANUS_ARTIFACT_ROOT` on the persistent application volume.
-
-## Usage and quotas
-
-Each project has monthly token/task and concurrent-task limits. Usage is estimated deterministically from stored text at roughly four characters per token and priced with `OPENMANUS_USAGE_INPUT_RATE` and `OPENMANUS_USAGE_OUTPUT_RATE`. These are platform accounting estimates and should be replaced with provider-reported usage for billing-grade accounting.
-
 ## Database migrations
 
-Production deployments should run:
+Run:
 
 ```bash
 alembic upgrade head
 ```
 
-The API can still auto-create tables for isolated local development with `OPENMANUS_AUTO_CREATE_DB=true`. Production should keep this disabled.
+Production should never depend on automatic `Base.metadata.create_all`; that mode is for isolated local development only.
 
-## Important deployment boundary
+## Usage accounting
 
-This is a development-oriented operational platform, not a finished public SaaS. Before exposing untrusted users, run the full integration test suite in CI, use a real secrets manager, enable a real isolated sandbox backend, add rate limits/tenant roles, and verify provider-reported billing usage.
+The OpenManus `ask_tool` path exposes provider-returned `prompt_tokens` and `completion_tokens`, which the worker records as `usage_source=provider`. This repository still uses a deterministic text estimate as a fallback for execution paths where provider usage is unavailable.
+
+## Security boundary
+
+This is a production-hardening slice, not a claim that every deployment is automatically secure. Public deployment still requires correct secret provisioning, isolated Daytona configuration, network controls, rate-limit tuning, dependency updates, observability, backup/restore testing, and an environment-specific security review.
