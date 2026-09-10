@@ -2,7 +2,7 @@
 [llm]
 model = "claude-3-7-sonnet-20250219"
 base_url = "https://api.anthropic.com/v1/"
-# Use secret://llm_api_key in production instead of committing a credential.
+# Use secret://openmanus_llm_api_key in production instead of committing a credential.
 api_key = "secret://openmanus_llm_api_key"
 max_tokens = 8192
 temperature = 0.0
@@ -31,14 +31,14 @@ api_key = "secret://openmanus_llm_api_key"
 max_tokens = 8192
 temperature = 0.0
 
-# Daytona is required for the production sandbox boundary.
+# Daytona-backed production sandbox configuration.
 [daytona]
 daytona_api_key = "secret://openmanus_daytona_api_key"
 daytona_server_url = "https://app.daytona.io/api"
 daytona_target = "us"
 sandbox_image_name = "whitezxj/sandbox:0.1.0"
 sandbox_entrypoint = "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf"
-VNC_password = "change-me-in-runtime"
+VNC_password = "secret://openmanus_vnc_password"
 
 # Optional browser configuration
 # [browser]
@@ -58,7 +58,7 @@ VNC_password = "change-me-in-runtime"
 # lang = "en"
 # country = "us"
 
-# Optional local sandbox defaults. Production platform policy ignores direct host execution.
+# Optional local sandbox defaults. The production platform routes risky execution through Daytona.
 # [sandbox]
 # use_sandbox = false
 # image = "python:3.12-slim"
