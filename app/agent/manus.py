@@ -13,6 +13,7 @@ from app.tool.ask_human import AskHuman
 from app.tool.mcp import MCPClients, MCPClientTool
 from app.tool.python_execute import PythonExecute
 from app.tool.str_replace_editor import StrReplaceEditor
+from app.tool.web_search import WebSearch
 
 
 _BROWSER_USE_SERVER_ID = "browser_use"
@@ -50,38 +51,31 @@ class Manus(ToolCallAgent):
     max_observe: int = 10000
     max_steps: int = 20
 
-    # MCP clients for remote tool access
     mcp_clients: MCPClients = Field(default_factory=MCPClients)
 
-    # Add general-purpose tools to the tool collection
     available_tools: ToolCollection = Field(
         default_factory=lambda: ToolCollection(
             PythonExecute(),
             StrReplaceEditor(),
+            WebSearch(),
             AskHuman(),
             Terminate(),
         )
     )
 
     special_tool_names: list[str] = Field(default_factory=lambda: [Terminate().name])
-
-    # Track connected MCP servers
-    connected_servers: Dict[str, str] = Field(
-        default_factory=dict
-    )  # server_id -> url/command
+    connected_servers: Dict[str, str] = Field(default_factory=dict)
     mcp_instruction_servers: set[str] = Field(default_factory=set, exclude=True)
     _initialized: bool = False
 
     @classmethod
     async def create(cls, **kwargs) -> "Manus":
-        """Factory method to create and properly initialize a Manus instance."""
         instance = cls(**kwargs)
         await instance.initialize_mcp_servers()
         instance._initialized = True
         return instance
 
     async def initialize_mcp_servers(self) -> None:
-        """Initialize connections to configured MCP servers."""
         if _BROWSER_USE_SERVER_ID not in config.mcp_config.servers and os.getenv(
             "OPENMANUS_DISABLE_BROWSER_USE", ""
         ).lower() not in {"1", "true", "yes"}:
@@ -135,7 +129,6 @@ class Manus(ToolCallAgent):
         tool_name_prefix: bool = True,
         stdio_env: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Connect to an MCP server and add its tools."""
         if use_stdio:
             await self.mcp_clients.connect_stdio(
                 server_url,
@@ -149,7 +142,6 @@ class Manus(ToolCallAgent):
             await self.mcp_clients.connect_sse(server_url, server_id)
             self.connected_servers[server_id or server_url] = server_url
 
-        # Update available tools with only the new tools from this server
         new_tools = [
             tool for tool in self.mcp_clients.tools if tool.server_id == server_id
         ]
@@ -171,14 +163,12 @@ class Manus(ToolCallAgent):
             self.mcp_instruction_servers.add(resolved_server_id)
 
     async def disconnect_mcp_server(self, server_id: str = "") -> None:
-        """Disconnect from an MCP server and remove its tools."""
         await self.mcp_clients.disconnect(server_id)
         if server_id:
             self.connected_servers.pop(server_id, None)
         else:
             self.connected_servers.clear()
 
-        # Rebuild available tools without the disconnected server's tools
         base_tools = [
             tool
             for tool in self.available_tools.tools
@@ -188,14 +178,11 @@ class Manus(ToolCallAgent):
         self.available_tools.add_tools(*self.mcp_clients.tools)
 
     async def cleanup(self):
-        """Clean up Manus agent resources."""
-        # Disconnect from all MCP servers only if we were initialized
         if self._initialized:
             await self.disconnect_mcp_server()
             self._initialized = False
 
     async def think(self) -> bool:
-        """Process current state and decide next actions with appropriate context."""
         if not self._initialized:
             await self.initialize_mcp_servers()
             self._initialized = True
