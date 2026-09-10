@@ -60,11 +60,46 @@ def extract_website_manifests(step_results: list[str]) -> tuple[dict, list[dict]
             "usage": item.get("usage"),
             "width": item.get("width"),
             "height": item.get("height"),
+            "license_or_source": item.get("license_or_source") or item.get("license"),
         }
         for item in assets
         if str(item.get("id") or item.get("asset_id") or "").strip()
     ]
     return design_system, normalized_sections, normalized_assets
+
+
+def extract_website_research(step_results: list[str]) -> dict:
+    research: dict = {}
+    for result in step_results:
+        parsed = extract_json_marker(result, "WEBSITE_RESEARCH_JSON")
+        if isinstance(parsed, dict):
+            research = parsed
+        file_match = re.search(r"WEBSITE_RESEARCH_JSON\s*[:=]\s*(\{.*?\})\s*$", result or "", flags=re.IGNORECASE | re.DOTALL)
+        if not research and file_match:
+            try:
+                research = json.loads(file_match.group(1))
+            except json.JSONDecodeError:
+                pass
+    references = research.get("references", []) if isinstance(research, dict) else []
+    normalized = []
+    for item in references[:2] if isinstance(references, list) else []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "name": str(item.get("name") or "Reference").strip()[:200],
+                "url": str(item.get("url") or "").strip()[:2000],
+                "category": str(item.get("category") or "").strip()[:120],
+                "reason_selected": str(item.get("reason_selected") or "").strip()[:1000],
+            }
+        )
+    return {
+        "website_type": str(research.get("website_type") or "unknown") if isinstance(research, dict) else "unknown",
+        "search_status": str(research.get("search_status") or "completed") if isinstance(research, dict) else "completed",
+        "references": normalized,
+        "patterns": research.get("patterns", {}) if isinstance(research, dict) else {},
+        "differentiation": research.get("differentiation", []) if isinstance(research, dict) else [],
+    }
 
 
 def extract_visual_score(step_results: list[str]) -> dict[str, object | None]:
