@@ -9,7 +9,7 @@ This layer adds a persistent, governed control plane around the existing OpenMan
 - Project-scoped tool policy with explicit deny, allow, and approval rules.
 - Durable approval requests and approve/deny endpoints.
 - Direct host Bash, Docker, and computer-use execution blocked by the platform boundary.
-- Production sandbox path using Daytona; the official Python SDK is pinned to `daytona==0.210.0` in this branch. Daytona documents its sandboxes as isolated execution environments. citeturn633941search3turn633941search1
+- Production sandbox path using Daytona; this branch pins the official Python SDK to `daytona==0.210.0`.
 - Persistent projects, conversations, tasks, workflow runs and audit events.
 - Persistent user/project memory and project knowledge retrieval.
 - Durable sequential workflows with heartbeat recovery.
@@ -17,7 +17,7 @@ This layer adds a persistent, governed control plane around the existing OpenMan
 - Redis-backed API rate limiting with a stricter authentication limit.
 - Monthly task/token quotas and concurrent-task limits.
 - Provider-reported token usage captured from OpenManus LLM responses where the provider returns usage data; estimated accounting remains the fallback for paths without provider counters.
-- Alembic migrations with PostgreSQL CI coverage.
+- Alembic migrations with PostgreSQL and Redis CI services.
 - Web operational console at `/`.
 
 ## Development
@@ -51,15 +51,22 @@ Production must use:
 - `OPENMANUS_SANDBOX_ENABLED=true`
 - `OPENMANUS_SANDBOX_BACKEND=daytona`
 - Redis rate limiting with `OPENMANUS_RATE_LIMIT_FAIL_OPEN=false`
-- a persistent artifact store or S3-compatible object storage
 - a real PostgreSQL database
+- a persistent artifact store or S3-compatible object storage
 - provider credentials supplied through mounted secrets rather than committed configuration values
 
-The production compose profile is provided as `docker-compose.production.yml`. It runs Alembic migrations before the API/worker and mounts separate JWT, LLM, and Daytona secrets.
+The production compose profile is `docker-compose.production.yml`. It runs Alembic migrations before the API/worker and mounts these external Docker secrets:
+
+- `openmanus_jwt_secret`
+- `openmanus_llm_api_key`
+- `openmanus_daytona_api_key`
+- `openmanus_vnc_password`
+
+The Daytona Python SDK is installed as `daytona==0.210.0`. Create the Daytona account/API credential separately and provision the matching external Docker secret before starting the production profile.
 
 ## Secret-backed provider configuration
 
-Use `secret://<name>` in `config/config.toml` for provider credentials, for example:
+Use `secret://<name>` in `config/config.toml`, for example:
 
 ```toml
 [llm]
@@ -67,15 +74,28 @@ api_key = "secret://openmanus_llm_api_key"
 
 [daytona]
 daytona_api_key = "secret://openmanus_daytona_api_key"
+VNC_password = "secret://openmanus_vnc_password"
 ```
 
-The runtime resolves these values from mounted secret files or `OPENMANUS_SECRET_*` environment variables without writing the secret value to the platform database.
+The runtime resolves these values from mounted secret files or `OPENMANUS_SECRET_*` environment variables without writing the secret values to the platform database or logs.
 
 ## Approval behavior
 
 A project policy can mark a tool pattern as approval-required. The worker pauses the task with status `awaiting_approval` and creates a durable approval request. Approving the request requeues the task; denying it permanently fails the task.
 
 Approval currently re-queues the task from its persisted prompt rather than checkpointing the exact in-memory agent state. Do not use approval-required patterns for non-idempotent side effects until checkpointed tool execution is added.
+
+## Execution boundary
+
+The platform blocks direct Bash, Docker and computer-use tools. Sandbox-pattern tools require the isolated Daytona backend in production. Sandboxes are created privately by the platform runtime; host execution is not exposed directly to users.
+
+## Storage
+
+Artifacts are scoped to a project and tenant permissions. With `OPENMANUS_S3_BUCKET` configured, uploads use the configured S3-compatible object store and API responses can expose short-lived presigned download URLs. Without S3 configuration, files are stored under `OPENMANUS_ARTIFACT_ROOT` on the persistent application volume. Uploaded artifacts also receive a SHA-256 digest.
+
+## Usage and quotas
+
+Each project has monthly token/task and concurrent-task limits. OpenManus task execution records provider-returned input/output token counters when available and tags those records as `provider`; deterministic text-based estimation remains the fallback for paths without provider counters.
 
 ## Database migrations
 
@@ -87,9 +107,9 @@ alembic upgrade head
 
 Production should never depend on automatic `Base.metadata.create_all`; that mode is for isolated local development only.
 
-## Usage accounting
+## CI
 
-The OpenManus `ask_tool` path exposes provider-returned `prompt_tokens` and `completion_tokens`, which the worker records as `usage_source=provider`. This repository still uses a deterministic text estimate as a fallback for execution paths where provider usage is unavailable.
+The platform workflow starts PostgreSQL and Redis, applies Alembic migrations, compiles the application/platform modules, and runs the platform test suite. The current environment cannot run Docker/GitHub Actions itself, so the repository workflow is the authoritative full integration check after a push.
 
 ## Security boundary
 
