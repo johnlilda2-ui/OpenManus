@@ -37,6 +37,7 @@ services:
       - openmanus_jwt_secret
       - openmanus_llm_api_key
       - openmanus_daytona_api_key
+      - openmanus_vnc_password
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -62,6 +63,7 @@ services:
       - openmanus_jwt_secret
       - openmanus_llm_api_key
       - openmanus_daytona_api_key
+      - openmanus_vnc_password
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -75,4 +77,6 @@ secrets:
   openmanus_llm_api_key:
     external: true
   openmanus_daytona_api_key:
+    external: true
+  openmanus_vnc_password:
     external: true
