@@ -70,7 +70,7 @@ async def current_usage(session: AsyncSession, project_id: str) -> dict[str, int
     running_workflows = await session.scalar(
         select(func.count(WorkflowRun.id)).where(
             WorkflowRun.project_id == project_id,
-            WorkflowRun.status.in_(["queued", "running"]),
+            WorkflowRun.status.in_(["queued", "running", "builder_queued", "builder_running"]),
         )
     )
     return {
