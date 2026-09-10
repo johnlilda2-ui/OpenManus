@@ -7,32 +7,44 @@ from redis.asyncio import Redis, from_url
 from sqlalchemy import select, update
 
 from app.agent.manus import Manus
+from platform_core.approvals import create_or_get_approval
+from platform_core.artifacts import storage
 from platform_core.database import SessionLocal, init_db
 from platform_core.events import add_audit_event, add_task_event, add_workflow_event
 from platform_core.memory import build_context, search_knowledge, search_memory
-from platform_core.models import Conversation, MemoryEntry, Message, ProjectPolicy, Task, Workflow, WorkflowRun, WorkflowStepRun
-from platform_core.policy import PolicyDenied, PolicyToolBroker, ToolPolicy
+from platform_core.models import ApprovalRequest, Conversation, MemoryEntry, Message, ProjectPolicy, Task, Workflow, WorkflowRun, WorkflowStepRun
+from platform_core.policy import PolicyDenied, PolicyToolBroker, ToolApprovalRequired, ToolPolicy
 from platform_core.queue import enqueue_workflow
+from platform_core.sandbox_boundary import SandboxBoundaryDenied, enforce_tool_boundary
 from platform_core.settings import settings
+from platform_core.usage import record_usage
 from platform_core.workflows import TERMINAL_WORKFLOW_STATUSES, get_or_create_step_run, render_step_prompt
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("openmanus-platform-worker")
-TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "awaiting_approval"}
 
 
 class PolicyManus(Manus):
     policy_broker: PolicyToolBroker = Field(default_factory=lambda: PolicyToolBroker(ToolPolicy.defaults()))
+    approved_tools: set[str] = Field(default_factory=set)
 
     async def execute_tool(self, command):
-        self.policy_broker.authorize(command.function.name)
+        tool_name = command.function.name
+        enforce_tool_boundary(tool_name, sandbox_enabled=settings.sandbox_enabled)
+        self.policy_broker.authorize(tool_name, approved=tool_name in self.approved_tools)
         return await super().execute_tool(command)
 
 
 async def get_project_policy(session, project_id: str) -> ToolPolicy:
     policy = await session.scalar(select(ProjectPolicy).where(ProjectPolicy.project_id == project_id))
     return ToolPolicy.from_model(policy)
+
+
+async def get_approved_tools(session, task_id: str) -> set[str]:
+    result = await session.scalars(select(ApprovalRequest.tool_name).where(ApprovalRequest.task_id == task_id, ApprovalRequest.status == "approved"))
+    return set(result.all())
 
 
 async def build_agent_prompt(session, *, owner_id: str, project_id: str, conversation_id: str | None, prompt: str, previous_output: str = "") -> str:
@@ -50,20 +62,13 @@ async def build_agent_prompt(session, *, owner_id: str, project_id: str, convers
 async def claim_queued_task(task_id: str | None = None) -> str | None:
     async with SessionLocal() as session:
         now = datetime.now(timezone.utc)
-        if task_id:
-            candidate_id = task_id
-        else:
+        candidate_id = task_id
+        if candidate_id is None:
             candidate_id = await session.scalar(select(Task.id).where(Task.status == "queued").order_by(Task.created_at.asc()).limit(1))
             if candidate_id is None:
                 return None
         result = await session.execute(update(Task).where(Task.id == candidate_id, Task.status == "queued", Task.cancel_requested.is_(False)).values(status="running", started_at=now))
         if result.rowcount != 1:
-            task = await session.get(Task, candidate_id)
-            if task is not None and task.status == "queued" and task.cancel_requested:
-                task.status = "cancelled"
-                task.completed_at = now
-                await add_task_event(session, task.id, "task.cancelled", {"status": task.status})
-                await session.commit()
             return None
         task = await session.get(Task, candidate_id)
         await add_task_event(session, task.id, "task.started", {"status": task.status})
@@ -73,14 +78,17 @@ async def claim_queued_task(task_id: str | None = None) -> str | None:
 
 
 async def process_task(task_id: str) -> None:
+    input_prompt = ""
     try:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if task is None:
                 return
+            input_prompt = task.prompt
             policy = await get_project_policy(session, task.project_id)
+            approved_tools = await get_approved_tools(session, task.id)
             prompt = await build_agent_prompt(session, owner_id=task.owner_id, project_id=task.project_id, conversation_id=task.conversation_id, prompt=task.prompt)
-        agent = await PolicyManus.create(policy_broker=PolicyToolBroker(policy))
+        agent = await PolicyManus.create(policy_broker=PolicyToolBroker(policy), approved_tools=approved_tools)
         result = await agent.run(prompt)
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
@@ -88,7 +96,6 @@ async def process_task(task_id: str) -> None:
                 return
             task.result = result
             task.completed_at = datetime.now(timezone.utc)
-            event_kind = "task.cancelled" if task.cancel_requested else "task.completed"
             task.status = "cancelled" if task.cancel_requested else "completed"
             if task.status == "completed":
                 session.add(MemoryEntry(owner_id=task.owner_id, project_id=task.project_id, kind="task_result", key=f"task:{task.id}", content=result[:20000], importance=40, metadata_json={"task_id": task.id}))
@@ -97,18 +104,29 @@ async def process_task(task_id: str) -> None:
                     conversation = await session.get(Conversation, task.conversation_id)
                     if conversation is not None:
                         conversation.updated_at = datetime.now(timezone.utc)
+                await record_usage(session, owner_id=task.owner_id, project_id=task.project_id, task_id=task.id, input_text=input_prompt, output_text=result)
+            event_kind = "task.cancelled" if task.status == "cancelled" else "task.completed"
             await add_task_event(session, task.id, event_kind, {"status": task.status, "result": result if task.status == "completed" else None})
             await add_audit_event(session, event_kind, actor_user_id=task.owner_id, project_id=task.project_id, task_id=task.id)
             await session.commit()
-    except PolicyDenied as exc:
+    except ToolApprovalRequired as exc:
+        async with SessionLocal() as session:
+            task = await session.get(Task, task_id)
+            if task is not None:
+                approval = await create_or_get_approval(session, task_id=task.id, project_id=task.project_id, tool_name=exc.tool_name, reason=exc.reason)
+                task.status = "awaiting_approval"
+                await add_task_event(session, task.id, "approval.required", {"status": task.status, "approval_id": approval.id, "tool": exc.tool_name, "reason": exc.reason})
+                await add_audit_event(session, "approval.requested", actor_user_id=task.owner_id, project_id=task.project_id, task_id=task.id, metadata={"approval_id": approval.id, "tool": exc.tool_name})
+                await session.commit()
+    except (PolicyDenied, SandboxBoundaryDenied) as exc:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if task is not None:
                 task.status = "failed"
                 task.error = str(exc)[:10000]
                 task.completed_at = datetime.now(timezone.utc)
-                await add_task_event(session, task.id, "policy.denied", {"status": task.status, "tool": exc.tool_name, "reason": exc.reason})
-                await add_audit_event(session, "policy.tool_denied", actor_user_id=task.owner_id, project_id=task.project_id, task_id=task.id, metadata={"tool": exc.tool_name, "reason": exc.reason})
+                await add_task_event(session, task.id, "policy.denied", {"status": task.status, "reason": str(exc)[:2000]})
+                await add_audit_event(session, "policy.tool_denied", actor_user_id=task.owner_id, project_id=task.project_id, task_id=task.id, metadata={"reason": str(exc)[:2000]})
                 await session.commit()
     except Exception as exc:
         logger.exception("Task %s failed", task_id)
@@ -126,20 +144,11 @@ async def process_task(task_id: str) -> None:
 async def claim_workflow_run(run_id: str | None = None) -> str | None:
     async with SessionLocal() as session:
         now = datetime.now(timezone.utc)
-        if run_id:
-            candidate_id = run_id
-        else:
-            candidate_id = await session.scalar(select(WorkflowRun.id).where(WorkflowRun.status == "queued").order_by(WorkflowRun.created_at.asc()).limit(1))
-            if candidate_id is None:
-                return None
+        candidate_id = run_id or await session.scalar(select(WorkflowRun.id).where(WorkflowRun.status == "queued").order_by(WorkflowRun.created_at.asc()).limit(1))
+        if candidate_id is None:
+            return None
         result = await session.execute(update(WorkflowRun).where(WorkflowRun.id == candidate_id, WorkflowRun.status == "queued", WorkflowRun.cancel_requested.is_(False)).values(status="running", started_at=now, heartbeat_at=now))
         if result.rowcount != 1:
-            run = await session.get(WorkflowRun, candidate_id)
-            if run is not None and run.status == "queued" and run.cancel_requested:
-                run.status = "cancelled"
-                run.completed_at = now
-                await add_workflow_event(session, run.id, "workflow.cancelled", {"status": run.status})
-                await session.commit()
             return None
         run = await session.get(WorkflowRun, candidate_id)
         await add_workflow_event(session, run.id, "workflow.started", {"status": run.status, "step": run.current_step})
@@ -162,14 +171,13 @@ async def process_workflow_run(run_id: str) -> None:
                 await add_workflow_event(session, run.id, "workflow.cancelled", {"status": run.status})
                 await session.commit()
                 return
-            steps = workflow.steps_json
-            if run.current_step >= len(steps):
+            if run.current_step >= len(workflow.steps_json):
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
                 await add_workflow_event(session, run.id, "workflow.completed", {"status": run.status, "output": run.output or ""})
                 await session.commit()
                 return
-            spec = steps[run.current_step]
+            spec = workflow.steps_json[run.current_step]
             step = await get_or_create_step_run(session, run=run, step_index=run.current_step, step_name=spec["name"], prompt=spec["prompt"])
             step.status = "running"
             step.attempt += 1
@@ -218,16 +226,18 @@ async def process_workflow_run(run_id: str) -> None:
                 await enqueue_workflow(run_id)
             except Exception:
                 logger.exception("Could not requeue workflow %s; recovery sweep will handle it", run_id)
-    except PolicyDenied as exc:
-        logger.error("Policy denied workflow %s: %s", run_id, exc)
+    except (ToolApprovalRequired, PolicyDenied, SandboxBoundaryDenied) as exc:
         async with SessionLocal() as session:
             run = await session.get(WorkflowRun, run_id)
             if run is not None:
-                run.status = "failed"
-                run.error = str(exc)[:10000]
-                run.completed_at = datetime.now(timezone.utc)
-                await add_workflow_event(session, run.id, "policy.denied", {"status": run.status, "tool": exc.tool_name, "reason": exc.reason})
-                await add_audit_event(session, "policy.tool_denied", actor_user_id=run.owner_id, project_id=run.project_id, metadata={"tool": exc.tool_name, "reason": exc.reason, "run_id": run.id})
+                if isinstance(exc, ToolApprovalRequired):
+                    run.status = "awaiting_approval"
+                    await add_workflow_event(session, run.id, "approval.required", {"status": run.status, "tool": exc.tool_name, "reason": exc.reason})
+                else:
+                    run.status = "failed"
+                    run.error = str(exc)[:10000]
+                    await add_workflow_event(session, run.id, "policy.denied", {"status": run.status, "reason": str(exc)[:2000]})
+                run.completed_at = datetime.now(timezone.utc) if run.status == "failed" else None
                 await session.commit()
     except Exception as exc:
         logger.exception("Workflow run %s failed", run_id)
@@ -238,7 +248,6 @@ async def process_workflow_run(run_id: str) -> None:
                 run.error = str(exc)[:10000]
                 run.completed_at = datetime.now(timezone.utc)
                 await add_workflow_event(session, run.id, "workflow.failed", {"status": run.status, "error": run.error})
-                await add_audit_event(session, "workflow.failed", actor_user_id=run.owner_id, project_id=run.project_id, metadata={"workflow_id": run.workflow_id, "run_id": run.id})
                 await session.commit()
 
 
