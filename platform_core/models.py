@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from platform_core.database import Base
@@ -40,27 +40,12 @@ class ProjectPolicy(Base):
     __tablename__ = "project_policies"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
-    )
-    allowed_tool_patterns: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=lambda: [
-            "terminate",
-            "planning",
-            "python_execute",
-            "str_replace_editor",
-            "ask_human",
-            "web_search",
-            "crawl4ai",
-            "create_chat_completion",
-            "browser_*",
-        ],
-    )
-    denied_tool_patterns: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=lambda: ["bash", "computer_use*", "sandbox*", "docker*"],
-    )
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    allowed_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: [
+        "terminate", "planning", "python_execute", "str_replace_editor", "ask_human",
+        "web_search", "crawl4ai", "create_chat_completion", "browser_*",
+    ])
+    denied_tool_patterns: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["bash", "computer_use*", "sandbox*", "docker*"])
     approval_required_patterns: Mapped[list[str]] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -128,6 +113,22 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    tool_name: Mapped[str] = mapped_column(String(200))
+    reason: Mapped[str] = mapped_column(String(1000))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("task_id", "tool_name", "status", name="uq_active_tool_approval"),)
+
+
 class MemoryEntry(Base):
     __tablename__ = "memory_entries"
 
@@ -191,9 +192,7 @@ class WorkflowRun(Base):
 
 class WorkflowStepRun(Base):
     __tablename__ = "workflow_step_runs"
-    __table_args__ = (
-        UniqueConstraint("workflow_run_id", "step_index", name="uq_workflow_step_run_index"),
-    )
+    __table_args__ = (UniqueConstraint("workflow_run_id", "step_index", name="uq_workflow_step_run_index"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workflow_run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.id", ondelete="CASCADE"), index=True)
@@ -218,8 +217,51 @@ class WorkflowEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+    filename: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")
+    storage_key: Mapped[str] = mapped_column(String(1000), unique=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ProjectQuota(Base):
+    __tablename__ = "project_quotas"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    monthly_token_limit: Mapped[int] = mapped_column(Integer, default=100_000)
+    monthly_task_limit: Mapped[int] = mapped_column(Integer, default=1_000)
+    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, default=2)
+    hard_block: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 Index("ix_task_events_task_id_id", TaskEvent.task_id, TaskEvent.id)
 Index("ix_audit_events_created_at", AuditEvent.created_at)
 Index("ix_memory_entries_project_created", MemoryEntry.project_id, MemoryEntry.created_at)
 Index("ix_knowledge_documents_project_created", KnowledgeDocument.project_id, KnowledgeDocument.created_at)
 Index("ix_workflow_events_run_id_id", WorkflowEvent.workflow_run_id, WorkflowEvent.id)
+Index("ix_artifacts_project_created", Artifact.project_id, Artifact.created_at)
+Index("ix_usage_records_project_created", UsageRecord.project_id, UsageRecord.created_at)
