@@ -22,9 +22,11 @@ from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import AppBuilderCreate, AppBuilderResponse, WorkflowEventResponse, WorkflowRunDetailResponse
 from platform_core.usage import check_quota
 from platform_core.website_builder import build_website_builder_steps
+from platform_core.website_experience_api import register as register_website_experience
 from platform_core.workflows import normalize_steps
 
 router = APIRouter()
+register_website_experience(router)
 
 
 async def project_access(session: AsyncSession, project_id: str, user: User, minimum_role: str) -> Project:
