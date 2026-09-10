@@ -1,6 +1,7 @@
 from pydantic import Field
 
 from app.agent.sandbox_agent import SandboxManus
+from app.tool.sandbox.sb_preview_tool import SandboxPreviewTool
 
 from platform_core.policy import PolicyToolBroker, ToolPolicy
 from platform_core.sandbox_boundary import enforce_tool_boundary
@@ -10,6 +11,14 @@ from platform_core.settings import settings
 class PolicySandboxManus(SandboxManus):
     policy_broker: PolicyToolBroker = Field(default_factory=lambda: PolicyToolBroker(ToolPolicy.defaults()))
     approved_tools: set[str] = Field(default_factory=set)
+
+    @classmethod
+    async def create(cls, **kwargs) -> "PolicySandboxManus":
+        instance = await super().create(**kwargs)
+        instance.available_tools.add_tools(
+            SandboxPreviewTool.create_with_sandbox(instance.sandbox)
+        )
+        return instance
 
     async def execute_tool(self, command):
         tool_name = command.function.name
