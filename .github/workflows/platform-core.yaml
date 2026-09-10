@@ -36,6 +36,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CI: "true"
+      OPENMANUS_ENV: development
+      OPENMANUS_AUTO_CREATE_DB: "false"
+      DATABASE_URL: postgresql+asyncpg://openmanus:openmanus@127.0.0.1:5432/openmanus
+      REDIS_URL: redis://127.0.0.1:6379/0
+      OPENMANUS_JWT_SECRET: ci-only-secret
+      OPENMANUS_SANDBOX_ENABLED: "false"
+      OPENMANUS_RATE_LIMIT_FAIL_OPEN: "false"
     services:
       postgres:
         image: postgres:16
@@ -57,22 +67,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
-    env:
-      CI: "true"
-      OPENMANUS_ENV: development
-      OPENMANUS_AUTO_CREATE_DB: "false"
-      DATABASE_URL: postgresql+asyncpg://openmanus:openmanus@127.0.0.1:5432/openmanus
-      REDIS_URL: redis://127.0.0.1:6379/0
-      OPENMANUS_JWT_SECRET: ci-only-secret
-      OPENMANUS_SANDBOX_ENABLED: "false"
-      OPENMANUS_RATE_LIMIT_FAIL_OPEN: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Verify platform package import
+        run: python -c "import platform_core; print(platform_core.__file__)"
       - name: Syntax check
         run: python -m compileall -q app platform_core alembic
       - name: Apply migrations
@@ -99,6 +105,4 @@ jobs:
           echo
           cat /tmp/openmanus-api.log
       - name: Platform tests
-        env:
-          PYTHONPATH: .
         run: pytest -q tests/platform_core
