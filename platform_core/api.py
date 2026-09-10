@@ -12,6 +12,7 @@ from redis.asyncio import from_url
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_core.app_builder_api import router as app_builder_router
 from platform_core.auth import create_access_token, get_current_user, hash_password, verify_password
 from platform_core.database import SessionLocal, get_db, init_db
 from platform_core.events import add_audit_event, add_task_event
@@ -33,8 +34,20 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="OpenManus Operational Platform", version="0.4.0", description="Persistent control plane around the OpenManus agent engine.", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title="OpenManus Operational Platform",
+    version="0.5.0",
+    description="Persistent control plane around the OpenManus agent engine.",
+    lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(app_builder_router)
 app.include_router(extra_router)
 app.include_router(tenant_router)
 
@@ -51,7 +64,11 @@ async def enforce_rate_limit(request: Request, call_next):
     try:
         await check_rate_limit(redis, key=key, limit=limit)
     except RateLimitExceeded as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": str(exc.retry_after)})
+        return JSONResponse(
+            {"detail": str(exc)},
+            status_code=429,
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     except Exception:
         if not settings.rate_limit_fail_open:
             return JSONResponse({"detail": "Rate limiting service unavailable"}, status_code=503)
@@ -60,7 +77,12 @@ async def enforce_rate_limit(request: Request, call_next):
     return await call_next(request)
 
 
-async def require_project_access(session: AsyncSession, project: Project | None, user: User, minimum_role: str) -> Project:
+async def require_project_access(
+    session: AsyncSession,
+    project: Project | None,
+    user: User,
+    minimum_role: str,
+) -> Project:
     try:
         return await require_project_role(session, project, user.id, minimum_role)
     except PermissionDenied as exc:
@@ -69,6 +91,7 @@ async def require_project_access(session: AsyncSession, project: Project | None,
 
 async def get_or_create_policy(session: AsyncSession, project_id: str):
     from platform_core.models import ProjectPolicy
+
     policy = await session.scalar(select(ProjectPolicy).where(ProjectPolicy.project_id == project_id))
     if policy is not None:
         return policy
@@ -102,7 +125,11 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)) 
     email = payload.email.strip().lower()
     user = await session.scalar(select(User).where(User.email == email))
     if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is disabled")
     await add_audit_event(session, "auth.login", actor_user_id=user.id)
@@ -116,7 +143,11 @@ async def me(user: User = Depends(get_current_user)) -> UserResponse:
 
 
 @app.post("/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-async def create_project(payload: ProjectCreate, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> ProjectResponse:
+async def create_project(
+    payload: ProjectCreate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
     project = Project(owner_id=user.id, name=payload.name.strip(), description=payload.description)
     session.add(project)
     await session.flush()
@@ -127,6 +158,7 @@ async def create_project(payload: ProjectCreate, user: User = Depends(get_curren
     session.add(TenantMember(tenant_id=tenant.id, user_id=user.id, role="owner"))
     await get_or_create_policy(session, project.id)
     from platform_core.usage import get_or_create_quota
+
     await get_or_create_quota(session, project.id)
     await add_audit_event(session, "project.created", actor_user_id=user.id, project_id=project.id)
     await session.commit()
@@ -134,42 +166,99 @@ async def create_project(payload: ProjectCreate, user: User = Depends(get_curren
 
 
 @app.get("/v1/projects", response_model=list[ProjectResponse])
-async def list_projects(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[ProjectResponse]:
+async def list_projects(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[ProjectResponse]:
     membership_projects = select(TenantMember.tenant_id).where(TenantMember.user_id == user.id)
-    result = await session.scalars(select(Project).where(or_(Project.owner_id == user.id, Project.tenant_id.in_(membership_projects))).order_by(Project.created_at.desc()))
+    result = await session.scalars(
+        select(Project)
+        .where(or_(Project.owner_id == user.id, Project.tenant_id.in_(membership_projects)))
+        .order_by(Project.created_at.desc())
+    )
     return [ProjectResponse.model_validate(project) for project in result.all()]
 
 
-@app.post("/v1/projects/{project_id}/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
-async def create_conversation(project_id: str, payload: ConversationCreate, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> ConversationResponse:
+@app.post(
+    "/v1/projects/{project_id}/conversations",
+    response_model=ConversationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_conversation(
+    project_id: str,
+    payload: ConversationCreate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ConversationResponse:
     project = await require_project_access(session, await session.get(Project, project_id), user, "member")
     conversation = Conversation(project_id=project.id, owner_id=user.id, title=payload.title.strip())
     session.add(conversation)
     await session.flush()
     await add_audit_event(session, "conversation.created", actor_user_id=user.id, project_id=project.id)
     await session.commit()
-    return ConversationResponse(id=conversation.id, project_id=conversation.project_id, title=conversation.title, created_at=conversation.created_at, updated_at=conversation.updated_at, messages=[])
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        messages=[],
+    )
 
 
 @app.get("/v1/projects/{project_id}/conversations", response_model=list[ConversationResponse])
-async def list_conversations(project_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[ConversationResponse]:
+async def list_conversations(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[ConversationResponse]:
     project = await require_project_access(session, await session.get(Project, project_id), user, "viewer")
-    result = await session.scalars(select(Conversation).where(Conversation.project_id == project.id).order_by(Conversation.updated_at.desc()))
-    return [ConversationResponse(id=c.id, project_id=c.project_id, title=c.title, created_at=c.created_at, updated_at=c.updated_at, messages=[]) for c in result.all()]
+    result = await session.scalars(
+        select(Conversation).where(Conversation.project_id == project.id).order_by(Conversation.updated_at.desc())
+    )
+    return [
+        ConversationResponse(
+            id=c.id,
+            project_id=c.project_id,
+            title=c.title,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            messages=[],
+        )
+        for c in result.all()
+    ]
 
 
 @app.get("/v1/conversations/{conversation_id}", response_model=ConversationResponse)
-async def get_conversation(conversation_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> ConversationResponse:
+async def get_conversation(
+    conversation_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ConversationResponse:
     conversation = await session.get(Conversation, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     await require_project_access(session, await session.get(Project, conversation.project_id), user, "viewer")
-    messages = await session.scalars(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()))
-    return ConversationResponse(id=conversation.id, project_id=conversation.project_id, title=conversation.title, created_at=conversation.created_at, updated_at=conversation.updated_at, messages=[MessageResponse.model_validate(message) for message in messages.all()])
+    messages = await session.scalars(
+        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
+    )
+    return ConversationResponse(
+        id=conversation.id,
+        project_id=conversation.project_id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        messages=[MessageResponse.model_validate(message) for message in messages.all()],
+    )
 
 
 @app.post("/v1/conversations/{conversation_id}/tasks", response_model=TaskResponse, status_code=status.HTTP_202_ACCEPTED)
-async def create_task(conversation_id: str, payload: TaskCreate, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
+async def create_task(
+    conversation_id: str,
+    payload: TaskCreate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> TaskResponse:
     conversation = await session.get(Conversation, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -178,7 +267,13 @@ async def create_task(conversation_id: str, payload: TaskCreate, user: User = De
     allowed, reason, _ = await check_quota(session, project.id, prompt)
     if not allowed:
         raise HTTPException(status_code=429, detail=reason)
-    task = Task(project_id=project.id, conversation_id=conversation.id, owner_id=user.id, prompt=prompt, status="queued")
+    task = Task(
+        project_id=project.id,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        prompt=prompt,
+        status="queued",
+    )
     session.add(task)
     await session.flush()
     session.add(Message(conversation_id=conversation.id, task_id=task.id, role="user", content=prompt))
@@ -189,20 +284,33 @@ async def create_task(conversation_id: str, payload: TaskCreate, user: User = De
         await enqueue_task(task.id)
     except Exception as exc:
         async with SessionLocal() as audit_session:
-            await add_task_event(audit_session, task.id, "task.queue_deferred", {"status": "queued", "reason": str(exc)[:1000]})
+            await add_task_event(
+                audit_session,
+                task.id,
+                "task.queue_deferred",
+                {"status": "queued", "reason": str(exc)[:1000]},
+            )
             await audit_session.commit()
     return TaskResponse.model_validate(task)
 
 
 @app.get("/v1/projects/{project_id}/tasks", response_model=list[TaskResponse])
-async def list_tasks(project_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> list[TaskResponse]:
+async def list_tasks(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[TaskResponse]:
     project = await require_project_access(session, await session.get(Project, project_id), user, "viewer")
     result = await session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.created_at.desc()))
     return [TaskResponse.model_validate(task) for task in result.all()]
 
 
 @app.get("/v1/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
+async def get_task(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> TaskResponse:
     task = await session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -211,7 +319,11 @@ async def get_task(task_id: str, user: User = Depends(get_current_user), session
 
 
 @app.post("/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
-async def cancel_task(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)) -> TaskResponse:
+async def cancel_task(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> TaskResponse:
     task = await session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -231,7 +343,12 @@ async def cancel_task(task_id: str, user: User = Depends(get_current_user), sess
 
 
 @app.get("/v1/tasks/{task_id}/events")
-async def task_events(task_id: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db), last_event_id: int | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
+async def task_events(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    last_event_id: int | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
     task = await session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -243,16 +360,26 @@ async def task_events(task_id: str, user: User = Depends(get_current_user), sess
         keepalive_at = datetime.now(timezone.utc)
         while True:
             async with SessionLocal() as stream_session:
-                events = await stream_session.scalars(select(TaskEvent).where(TaskEvent.task_id == task_id, TaskEvent.id > last_id).order_by(TaskEvent.id.asc()).limit(100))
+                events = await stream_session.scalars(
+                    select(TaskEvent)
+                    .where(TaskEvent.task_id == task_id, TaskEvent.id > last_id)
+                    .order_by(TaskEvent.id.asc())
+                    .limit(100)
+                )
                 rows = events.all()
                 current_task = await stream_session.get(Task, task_id)
             sent = False
             for event in rows:
-                data = json.dumps(TaskEventResponse.model_validate(event).model_dump(mode="json"), separators=(",", ":"))
+                data = json.dumps(
+                    TaskEventResponse.model_validate(event).model_dump(mode="json"),
+                    separators=(",", ":"),
+                )
                 yield f"id: {event.id}\nevent: {event.kind}\ndata: {data}\n\n"
                 last_id = event.id
                 sent = True
-            if current_task is None or (current_task.status in {"completed", "failed", "cancelled"} and not sent):
+            if current_task is None or (
+                current_task.status in {"completed", "failed", "cancelled"} and not sent
+            ):
                 return
             now = datetime.now(timezone.utc)
             if (now - keepalive_at).total_seconds() >= 15:
@@ -260,4 +387,12 @@ async def task_events(task_id: str, user: User = Depends(get_current_user), sess
                 keepalive_at = now
             await asyncio.sleep(1)
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
