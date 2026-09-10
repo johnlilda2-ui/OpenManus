@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass(frozen=True)
 class BuilderStep:
     name: str
@@ -11,212 +10,40 @@ class BuilderStep:
     max_attempts: int = 1
     browser_required: bool = False
 
-
 def project_workspace(project_id: str) -> str:
     return f"workspace/projects/{project_id}"
-
 
 def build_app_builder_steps(project_id: str, requirements: str) -> list[dict]:
     workspace = project_workspace(project_id)
     shared = f"""
 You are working on a dedicated software project in {workspace}.
-Treat that directory as the project root. Do not modify files outside it unless
-explicitly required by the task. Preserve existing work when present.
+Treat that directory as the project root. Do not modify files outside
+unless explicitly required. Preserve existing work when present.
 The goal is a complete, runnable full-stack application, not a mockup.
-The generated application should include a polished responsive UI, a working
-backend, validation, clear environment variables, tests, and a README.
 Requirements from the user:
 {requirements}
 """.strip()
-
-    steps = [
-        BuilderStep(
-            name="Requirements and architecture",
-            role="planner",
-            prompt=f"""{shared}
-
-Analyze the requirements and inspect any existing project files. Create {workspace}/APP_PLAN.md containing:
-- product requirements and acceptance criteria
-- frontend/backend architecture
-- data model and API contract
-- UI pages/components and responsive states
-- test strategy
-- local development and deployment requirements
-Do not implement the application yet.""",
-        ),
-        BuilderStep(
-            name="Backend implementation",
-            role="builder",
-            prompt=f"""{shared}
-
-Read APP_PLAN.md. Implement the backend first. Prefer FastAPI + Pydantic when a
-Python backend is appropriate. Create working API routes, validation, error
-handling, persistence, authentication when required by the requirements, and
-backend tests. Keep configuration in environment variables and add a safe
-.env.example. Run the backend tests and fix failures before finishing.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Frontend implementation",
-            role="designer",
-            prompt=f"""{shared}
-
-Read APP_PLAN.md and the backend API. Implement a production-quality frontend.
-Prefer React + Vite with Tailwind CSS when appropriate. Build the complete user
-experience, not placeholder cards: responsive layout, loading/empty/error
-states, accessible controls, consistent typography and spacing, clear
-navigation, useful micro-interactions, and polished visual hierarchy. Connect
-real API data instead of mock-only data. Run the frontend build and fix errors.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Integration and preview configuration",
-            role="builder",
-            prompt=f"""{shared}
-
-Integrate frontend and backend end-to-end. Remove fake/mock data paths that are
-not required for the finished application. Add docker-compose.yml when useful,
-startup scripts, environment templates, database initialization/migrations,
-and a README with exact run instructions. Verify that the application can be
-started from a clean checkout.
-
-Also create {workspace}/APP_PREVIEW.json describing the safest local preview:
-{{
-  "command": "the exact command to start the preview server",
-  "port": 3000,
-  "health_path": "/",
-  "cwd": "."
-}}
-Use a non-privileged port. The command will run inside the isolated project
-sandbox only. Keep the preview server suitable for browser verification.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Run and preview",
-            role="tester",
-            prompt=f"""{shared}
-
-Read APP_PREVIEW.json and launch the application inside the isolated sandbox.
-Use sandbox_shell to run the exact preview command in a persistent named session.
-Do not run the application on the host machine.
-
-Verify the preview from inside the sandbox with curl against the configured
-health_path. Inspect the startup output and fix launch/runtime errors. Then use
-the sandbox_preview tool with the configured port to obtain the browser-accessible
-preview URL. Write {workspace}/PREVIEW_REPORT.md containing:
-- start command
-- port and health path
-- local health result
-- preview URL
-- relevant startup logs
-- exact command/session needed to stop the preview
-
-Leave the preview process running for the following QA phases unless it cannot
-be started safely.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Automated test and repair",
-            role="tester",
-            prompt=f"""{shared}
-
-Act as a release engineer. Read PREVIEW_REPORT.md if present and run the backend
-tests, frontend tests if present, linters/type checks where configured, and
-production builds. Diagnose failures instead of merely reporting them. Fix the
-implementation and rerun the failed checks. Continue until the available
-automated checks pass or a real external credential/dependency is clearly the
-only blocker. Record the final checks and any blockers in {workspace}/QA_REPORT.md.""",
-            max_attempts=3,
-        ),
-        BuilderStep(
-            name="Browser verification",
-            role="reviewer",
-            browser_required=True,
-            prompt=f"""{shared}
-
-Perform real browser-level QA against the running preview. Read
-PREVIEW_REPORT.md and use its preview URL; do not invent another URL. Use
-sandbox_browser to navigate to the application and inspect the actual rendered
-UI. Exercise the most important user flow from the requirements. Check:
-- initial page/rendering
-- navigation and links
-- forms and validation states
-- obvious console/runtime failures when observable
-- loading, empty and error states
-- responsive behavior where the browser tooling allows it
-- visual hierarchy, spacing and accessibility basics
-
-Do NOT silently fix issues in this phase. Record reproducible failures and their
-likely causes in {workspace}/QA_FAILURES.md. End your response with exactly one
-of:
-QA_STATUS: PASS
-QA_STATUS: FAIL
-
-For PASS, explain what was actually verified. For FAIL, provide concise,
-actionable failure details for the repair phase.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Autonomous repair",
-            role="fixer",
-            prompt=f"""{shared}
-
-Read QA_FAILURES.md and PREVIEW_REPORT.md. If the previous browser verification
-reported QA_STATUS: PASS, do not make functional changes; simply record that no
-repair was necessary.
-
-If QA_STATUS: FAIL, fix every reproducible browser issue you can. Use the
-sandbox shell/files tools only inside the isolated workspace. Restart the preview
-process when required, rerun focused automated checks, and update
-{workspace}/REPAIR_REPORT.md with each repair and its verification result.
-Finish by stating either REPAIR_STATUS: FIXED or REPAIR_STATUS: BLOCKED.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Browser re-verification",
-            role="reviewer",
-            browser_required=True,
-            prompt=f"""{shared}
-
-Re-run browser QA after the repair phase. Read PREVIEW_REPORT.md and
-REPAIR_REPORT.md and use the same running preview when possible. Exercise the
-same failures again and confirm the repaired behavior.
-
-If everything passes, update {workspace}/QA_REPORT.md with the final browser
-verification and end with:
-QA_STATUS: PASS
-
-If anything still fails, update QA_FAILURES.md with the remaining reproducible
-problems and end with:
-QA_STATUS: FAIL
-
-Do not claim success for checks you could not actually perform.""",
-            max_attempts=2,
-        ),
-        BuilderStep(
-            name="Final security and release review",
-            role="reviewer",
-            prompt=f"""{shared}
-
-Perform a final release review. Check for hard-coded credentials/secrets,
-unsafe debug settings, missing environment documentation, obvious authorization
-bypasses, insecure input handling, dependency/configuration mistakes, and broken
-setup instructions. Read PREVIEW_REPORT.md, QA_REPORT.md and REPAIR_REPORT.md
-when present. Fix issues that can be fixed locally. Produce:
-- {workspace}/RELEASE_CHECKLIST.md
-- {workspace}/FINAL_REPORT.md
-The final report must state what was verified, what was not verified, any
-remaining blockers, and the preview URL when one was successfully created.""",
-        ),
+    phase_data = [
+        ("Requirements and architecture", "planner", f"""{shared}
+Analyze the requirements and inspect any existing project files. Create {workspace}/APP_PLAN.md containing product requirements, acceptance criteria, architecture, data model, API contract, UI pages/components, test strategy, and deployment requirements. Do not implement yet.""", 1, False),
+        ("Backend implementation", "builder", f"""{shared}
+Read APP_PLAN.md. Implement the backend first. Prefer FastAPI + Pydantic when appropriate. Create working API routes, validation, persistence, authentication when required, and backend tests. Keep configuration in environment variables and add a safe .env.example. Run tests and fix failures.""", 2, False),
+        ("Frontend implementation", "designer", f"""{shared}
+Read APP_PLAN.md and the backend API. Implement a production-quality frontend. Prefer React + Vite + Tailwind when appropriate. Build responsive UX, loading/empty/error states, accessible controls, clear navigation, polished hierarchy, and real API integration. Run the frontend build and fix errors.""", 2, False),
+        ("Integration and preview configuration", "builder", f"""{shared}
+Integrate frontend and backend end-to-end. Add docker-compose.yml when useful, startup scripts, environment templates, database initialization/migrations, and a README with exact run instructions.
+Create {workspace}/APP_PREVIEW.json with the safest local preview command, non-privileged port, health_path, and cwd. The command will run inside the isolated sandbox only.""", 2, False),
+        ("Run and preview", "tester", f"""{shared}
+Read APP_PREVIEW.json and launch the application inside the isolated sandbox using sandbox_shell in a persistent named session. Do not run it on the host. Curl the configured health_path, fix launch/runtime errors, then call sandbox_preview with the configured port to obtain the browser-accessible preview URL. Write {workspace}/PREVIEW_REPORT.md with command, port, health result, preview URL, startup logs, and stop-session instructions. Leave the preview running for QA; if sandbox tools are unavailable, document that instead of host execution.""", 2, False),
+        ("Automated test and repair", "tester", f"""{shared}
+Read PREVIEW_REPORT.md. Run backend/frontend tests, linters/type checks when configured, and production builds. Diagnose failures, fix them, and rerun checks until they pass or an external dependency/credential is the only blocker. Record results in {workspace}/QA_REPORT.md.""", 3, False),
+        ("Browser verification", "reviewer", f"""{shared}
+Perform real browser QA against the running preview. Read PREVIEW_REPORT.md and use its preview URL; do not invent another URL. Use sandbox_browser to inspect rendering and exercise the most important user flow. Check navigation, forms, validation, runtime issues, states, responsiveness, visual hierarchy, and accessibility basics. Do not fix here. Write {workspace}/QA_FAILURES.md and end with exactly QA_STATUS: PASS or QA_STATUS: FAIL. If browser tooling is unavailable, report QA_STATUS: FAIL.""", 2, True),
+        ("Autonomous repair", "fixer", f"""{shared}
+Read QA_FAILURES.md and PREVIEW_REPORT.md. If QA_STATUS: PASS, make no functional changes. If QA_STATUS: FAIL, fix reproducible browser issues in the isolated workspace, restart preview when required, rerun focused checks, and write {workspace}/REPAIR_REPORT.md. End with REPAIR_STATUS: FIXED or REPAIR_STATUS: BLOCKED.""", 2, False),
+        ("Browser re-verification", "reviewer", f"""{shared}
+Re-run browser QA after repair using the same preview when possible. Exercise the same failures and confirm fixes. Update {workspace}/QA_REPORT.md. End with QA_STATUS: PASS if verified; otherwise QA_STATUS: FAIL. Never claim checks you could not perform.""", 2, True),
+        ("Final security and release review", "reviewer", f"""{shared}
+Perform a final release review for secrets, unsafe debug settings, missing environment documentation, authorization bypasses, insecure input handling, dependency/config mistakes, and broken setup instructions. Read the QA/release reports. Fix local issues. Produce {workspace}/RELEASE_CHECKLIST.md and {workspace}/FINAL_REPORT.md stating verified checks, unverified checks, blockers, and preview URL.""", 1, False),
     ]
-    return [
-        {
-            "name": step.name,
-            "prompt": step.prompt,
-            "model_profile": step.role,
-            "role": step.role,
-            "max_attempts": step.max_attempts,
-            "browser_required": step.browser_required,
-        }
-        for step in steps
-    ]
+    return [{"name": name, "prompt": prompt, "model_profile": role, "role": role, "max_attempts": attempts, "browser_required": browser_required} for name, role, prompt, attempts, browser_required in phase_data]

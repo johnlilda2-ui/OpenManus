@@ -43,8 +43,7 @@ jobs:
           POSTGRES_DB: openmanus
           POSTGRES_USER: openmanus
           POSTGRES_PASSWORD: openmanus
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U openmanus -d openmanus"
           --health-interval 5s
@@ -52,8 +51,7 @@ jobs:
           --health-retries 20
       redis:
         image: redis:7-alpine
-        ports:
-          - 6379:6379
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
