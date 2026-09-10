@@ -2,6 +2,8 @@ from pydantic import Field
 
 from app.agent.sandbox_agent import SandboxManus
 from app.tool.sandbox.sb_preview_tool import SandboxPreviewTool
+from app.tool.sandbox.sb_visual_browser_tool import SandboxVisualBrowserTool
+from app.tool.tool_collection import ToolCollection
 
 from platform_core.policy import PolicyToolBroker, ToolPolicy
 from platform_core.sandbox_boundary import enforce_tool_boundary
@@ -15,8 +17,11 @@ class PolicySandboxManus(SandboxManus):
     @classmethod
     async def create(cls, **kwargs) -> "PolicySandboxManus":
         instance = await super().create(**kwargs)
+        tools = [tool for tool in instance.available_tools.tools if tool.name != "sandbox_browser"]
+        instance.available_tools = ToolCollection(*tools)
         instance.available_tools.add_tools(
-            SandboxPreviewTool.create_with_sandbox(instance.sandbox)
+            SandboxVisualBrowserTool.create_with_sandbox(instance.sandbox),
+            SandboxPreviewTool.create_with_sandbox(instance.sandbox),
         )
         return instance
 
