@@ -1,0 +1,68 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      OPENMANUS_ENV: production
+      OPENMANUS_AUTO_CREATE_DB: "false"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    command: ["uvicorn", "platform_core.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    environment:
+      OPENMANUS_ENV: production
+      OPENMANUS_AUTO_CREATE_DB: "false"
+      OPENMANUS_JWT_SECRET_FILE: /run/secrets/openmanus_jwt_secret
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      OPENMANUS_SANDBOX_ENABLED: "true"
+      OPENMANUS_SANDBOX_BACKEND: daytona
+      OPENMANUS_ARTIFACT_ROOT: /data/artifacts
+      OPENMANUS_RATE_LIMIT_FAIL_OPEN: "false"
+      OPENMANUS_CORS_ORIGINS: ${OPENMANUS_CORS_ORIGINS:?OPENMANUS_CORS_ORIGINS is required}
+    ports:
+      - "8000:8000"
+    volumes:
+      - openmanus-artifacts:/data/artifacts
+      - ./config:/app/config:ro
+    secrets:
+      - openmanus_jwt_secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    command: ["python", "-m", "platform_core.worker"]
+    environment:
+      OPENMANUS_ENV: production
+      OPENMANUS_AUTO_CREATE_DB: "false"
+      OPENMANUS_JWT_SECRET_FILE: /run/secrets/openmanus_jwt_secret
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      OPENMANUS_SANDBOX_ENABLED: "true"
+      OPENMANUS_SANDBOX_BACKEND: daytona
+      OPENMANUS_ARTIFACT_ROOT: /data/artifacts
+    volumes:
+      - openmanus-artifacts:/data/artifacts
+      - ./config:/app/config:ro
+    secrets:
+      - openmanus_jwt_secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  openmanus-artifacts:
+
+secrets:
+  openmanus_jwt_secret:
+    external: true
