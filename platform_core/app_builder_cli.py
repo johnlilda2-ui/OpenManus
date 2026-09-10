@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from sqlalchemy import select
+
 from platform_core.app_builder import build_app_builder_steps, project_workspace
 from platform_core.database import SessionLocal, init_db
 from platform_core.events import add_audit_event, add_workflow_event
@@ -12,13 +14,19 @@ from platform_core.queue import enqueue_app_builder
 from platform_core.workflows import normalize_steps
 
 
-async def create_builder_run(project_id: str, user_id: str, name: str, description: str | None, requirements: str) -> tuple[str, str]:
+async def create_builder_run(
+    project_id: str,
+    user_id: str,
+    name: str,
+    description: str | None,
+    requirements: str,
+) -> tuple[str, str]:
     await init_db()
     async with SessionLocal() as session:
         project = await session.get(Project, project_id)
         await require_project_role(session, project, user_id, "member")
         policy = await session.scalar(
-            __import__("sqlalchemy").select(ProjectPolicy).where(ProjectPolicy.project_id == project_id)
+            select(ProjectPolicy).where(ProjectPolicy.project_id == project_id)
         )
         if policy is None:
             session.add(ProjectPolicy(project_id=project_id))
@@ -40,15 +48,28 @@ async def create_builder_run(project_id: str, user_id: str, name: str, descripti
         )
         session.add(run)
         await session.flush()
-        await add_workflow_event(session, run.id, "builder.queued", {"status": run.status, "workspace": project_workspace(project_id)})
-        await add_audit_event(session, "builder.created", actor_user_id=user_id, project_id=project_id, metadata={"run_id": run.id, "workflow_id": workflow.id})
+        await add_workflow_event(
+            session,
+            run.id,
+            "builder.queued",
+            {"status": run.status, "workspace": project_workspace(project_id)},
+        )
+        await add_audit_event(
+            session,
+            "builder.created",
+            actor_user_id=user_id,
+            project_id=project_id,
+            metadata={"run_id": run.id, "workflow_id": workflow.id},
+        )
         await session.commit()
     await enqueue_app_builder(run.id)
     return workflow.id, run.id
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create a durable OpenManus App Builder run")
+    parser = argparse.ArgumentParser(
+        description="Create a durable OpenManus App Builder run"
+    )
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--requirements", required=True)
