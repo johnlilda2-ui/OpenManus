@@ -58,6 +58,19 @@ class ProjectPolicyUpdate(BaseModel):
     approval_required_patterns: list[str] = Field(default_factory=list, max_length=100)
 
 
+class ApprovalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    task_id: str
+    project_id: str
+    tool_name: str
+    reason: str
+    status: str
+    decided_by: str | None
+    requested_at: datetime
+    decided_at: datetime | None
+
+
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", min_length=1, max_length=200)
 
@@ -216,3 +229,38 @@ class WorkflowEventResponse(BaseModel):
     kind: str
     payload: dict
     created_at: datetime
+
+
+class ArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    task_id: str | None
+    filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+    download_url: str
+
+
+class ProjectQuotaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    project_id: str
+    monthly_token_limit: int
+    monthly_task_limit: int
+    max_concurrent_tasks: int
+    hard_block: bool
+
+
+class ProjectQuotaUpdate(BaseModel):
+    monthly_token_limit: int = Field(ge=1, le=1000000000)
+    monthly_task_limit: int = Field(ge=1, le=10000000)
+    max_concurrent_tasks: int = Field(ge=1, le=1000)
+    hard_block: bool = True
+
+
+class UsageSummaryResponse(BaseModel):
+    project_id: str
+    tokens: int
+    tasks: int
+    concurrent: int
