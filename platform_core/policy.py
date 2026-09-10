@@ -10,6 +10,11 @@ class PolicyDenied(PermissionError):
         super().__init__(f"Tool '{tool_name}' denied by platform policy: {reason}")
 
 
+class ToolApprovalRequired(PolicyDenied):
+    def __init__(self, tool_name: str):
+        super().__init__(tool_name, "human approval is required before this tool can execute")
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     allowed_tool_patterns: tuple[str, ...]
@@ -20,18 +25,11 @@ class ToolPolicy:
     def defaults(cls) -> "ToolPolicy":
         return cls(
             allowed_tool_patterns=(
-                "terminate",
-                "planning",
-                "python_execute",
-                "str_replace_editor",
-                "ask_human",
-                "web_search",
-                "crawl4ai",
-                "create_chat_completion",
-                "browser_*",
+                "terminate", "planning", "python_execute", "str_replace_editor", "ask_human",
+                "web_search", "crawl4ai", "create_chat_completion", "browser_*",
             ),
-            denied_tool_patterns=("bash", "computer_use*", "sandbox*", "docker*"),
-            approval_required_patterns=(),
+            denied_tool_patterns=("bash", "computer_use*", "docker*"),
+            approval_required_patterns=("sandbox*",),
         )
 
     @classmethod
@@ -51,14 +49,12 @@ class ToolPolicy:
             for pattern in patterns
         )
 
-    def authorize(self, tool_name: str) -> None:
+    def authorize(self, tool_name: str, *, approved: bool = False) -> None:
         if self.matches(tool_name, self.denied_tool_patterns):
             raise PolicyDenied(tool_name, "explicitly denied")
-
-        if self.approval_required_patterns and self.matches(tool_name, self.approval_required_patterns):
-            raise PolicyDenied(tool_name, "human approval is required but no approval token was supplied")
-
-        if self.allowed_tool_patterns and not self.matches(tool_name, self.allowed_tool_patterns):
+        if self.matches(tool_name, self.approval_required_patterns) and not approved:
+            raise ToolApprovalRequired(tool_name)
+        if self.allowed_tool_patterns and not self.matches(tool_name, self.allowed_tool_patterns) and not approved:
             raise PolicyDenied(tool_name, "not present in the project allowlist")
 
 
@@ -66,5 +62,5 @@ class PolicyToolBroker:
     def __init__(self, policy: ToolPolicy):
         self.policy = policy
 
-    def authorize(self, tool_name: str) -> None:
-        self.policy.authorize(tool_name)
+    def authorize(self, tool_name: str, *, approved: bool = False) -> None:
+        self.policy.authorize(tool_name, approved=approved)
