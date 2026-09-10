@@ -196,6 +196,8 @@ class AppBuilderCreate(BaseModel):
 
 class AppBuilderResponse(BaseModel):
     workflow: WorkflowResponse
+    run_id: str
+    status: str
     workspace: str
 
 
