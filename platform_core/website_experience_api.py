@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.auth import get_current_user
-from platform_core.database import get_db
+from platform_core.database import SessionLocal, get_db
 from platform_core.events import add_audit_event, add_workflow_event
-from platform_core.models import Project, ProjectPolicy, User, Workflow, WorkflowRun, WorkflowStepRun
+from platform_core.models import Project, User, Workflow, WorkflowRun, WorkflowStepRun
 from platform_core.permissions import PermissionDenied, require_project_role
 from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import WebsiteExperienceResponse, WebsiteIterationCreate, WebsiteSectionResponse, VisualScoreResponse
@@ -85,15 +86,15 @@ async def _sync_manifest_models(
                 WebsiteSection.section_id == item["section_id"],
             )
         )
-        values = dict(
-            source_run_id=run.id,
-            page=item["page"],
-            name=item["name"],
-            anchor=item.get("anchor"),
-            selector=item.get("selector"),
-            description=item.get("description"),
-            sort_order=item.get("sort_order", 0),
-        )
+        values = {
+            "source_run_id": run.id,
+            "page": item["page"],
+            "name": item["name"],
+            "anchor": item.get("anchor"),
+            "selector": item.get("selector"),
+            "description": item.get("description"),
+            "sort_order": item.get("sort_order", 0),
+        }
         if row is None:
             session.add(WebsiteSection(project_id=run.project_id, section_id=item["section_id"], **values))
         else:
@@ -107,18 +108,19 @@ async def _sync_manifest_models(
                 WebsiteAsset.asset_id == item["id"],
             )
         )
-        values = dict(
-            source_run_id=run.id,
-            kind=item.get("kind") or "image",
-            name=item.get("name") or item["id"],
-            path=item.get("path_or_url"),
-            source_url=item.get("path_or_url") if str(item.get("path_or_url") or "").startswith("http") else None,
-            alt_text=item.get("alt_text"),
-            usage=item.get("usage"),
-            width=item.get("width"),
-            height=item.get("height"),
-            metadata_json={},
-        )
+        path_or_url = item.get("path_or_url")
+        values = {
+            "source_run_id": run.id,
+            "kind": item.get("kind") or "image",
+            "name": item.get("name") or item["id"],
+            "path": path_or_url,
+            "source_url": path_or_url if str(path_or_url or "").startswith("http") else None,
+            "alt_text": item.get("alt_text"),
+            "usage": item.get("usage"),
+            "width": item.get("width"),
+            "height": item.get("height"),
+            "metadata_json": {},
+        }
         if row is None:
             session.add(WebsiteAsset(project_id=run.project_id, asset_id=item["id"], **values))
         else:
@@ -128,6 +130,10 @@ async def _sync_manifest_models(
 
 
 def register(router) -> None:
+    @router.get("/website-builder", include_in_schema=False)
+    async def website_builder_workspace() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "static" / "website_builder.html")
+
     @router.get("/v1/app-builder/runs/{run_id}/website-experience", response_model=WebsiteExperienceResponse)
     async def website_experience(
         run_id: str,
@@ -267,13 +273,14 @@ def register(router) -> None:
         try:
             await enqueue_app_builder(child_run.id)
         except Exception as exc:
-            async with session.begin():
+            async with SessionLocal() as recovery:
                 await add_workflow_event(
-                    session,
+                    recovery,
                     child_run.id,
                     "builder.queue_deferred",
                     {"status": "builder_queued", "reason": str(exc)[:1000]},
                 )
+                await recovery.commit()
             return {
                 "iteration_id": iteration.id,
                 "run_id": child_run.id,
