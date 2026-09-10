@@ -11,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.app_builder import build_app_builder_steps, project_workspace
+from platform_core.artifacts import storage
 from platform_core.auth import get_current_user
 from platform_core.database import SessionLocal, get_db
 from platform_core.events import add_audit_event, add_workflow_event
-from platform_core.models import Project, ProjectPolicy, User, Workflow, WorkflowEvent, WorkflowRun
+from platform_core.models import Artifact, Project, ProjectPolicy, User, Workflow, WorkflowEvent, WorkflowRun
 from platform_core.permissions import PermissionDenied, require_project_role
 from platform_core.queue import enqueue_app_builder
 from platform_core.schemas import AppBuilderCreate, AppBuilderResponse, WorkflowEventResponse, WorkflowRunDetailResponse
@@ -146,6 +147,29 @@ async def get_app_builder_run(
     return WorkflowRunDetailResponse.model_validate(run)
 
 
+@router.get("/v1/app-builder/runs/{run_id}/artifact")
+async def get_app_builder_artifact(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    run = await session.get(WorkflowRun, run_id)
+    if run is None or not run.status.startswith("builder_"):
+        raise HTTPException(status_code=404, detail="App Builder run not found")
+    await project_access(session, run.project_id, user, "viewer")
+    if run.status != "builder_completed":
+        raise HTTPException(status_code=409, detail="Application artifact is not ready")
+    artifact = await session.get(Artifact, f"builder-{run.id}")
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Application artifact not found")
+    url = storage.presigned_url(artifact.storage_key) or f"/v1/artifacts/{artifact.id}"
+    return {
+        "artifact_id": artifact.id,
+        "filename": artifact.filename,
+        "download_url": url,
+    }
+
+
 @router.post("/v1/app-builder/runs/{run_id}/cancel", response_model=WorkflowRunDetailResponse)
 async def cancel_app_builder_run(
     run_id: str,
@@ -213,7 +237,8 @@ async def app_builder_events(
                 last_id = event.id
                 sent = True
             if current_run is None or (
-                current_run.status in {"builder_completed", "builder_failed", "builder_cancelled"}
+                current_run.status
+                in {"builder_completed", "builder_failed", "builder_cancelled"}
                 and not sent
             ):
                 return
