@@ -26,10 +26,10 @@ class ToolPolicy:
         return cls(
             allowed_tool_patterns=(
                 "terminate", "planning", "python_execute", "str_replace_editor", "ask_human",
-                "web_search", "crawl4ai", "create_chat_completion", "browser_*",
+                "web_search", "crawl4ai", "create_chat_completion", "browser_*", "sandbox*",
             ),
             denied_tool_patterns=("bash", "computer_use*", "docker*"),
-            approval_required_patterns=("sandbox*",),
+            approval_required_patterns=(),
         )
 
     @classmethod
@@ -44,10 +44,7 @@ class ToolPolicy:
 
     @staticmethod
     def matches(tool_name: str, patterns: Iterable[str]) -> bool:
-        return any(
-            fnmatchcase(tool_name, pattern) or fnmatchcase(tool_name.lower(), pattern.lower())
-            for pattern in patterns
-        )
+        return any(fnmatchcase(tool_name, pattern) or fnmatchcase(tool_name.lower(), pattern.lower()) for pattern in patterns)
 
     def authorize(self, tool_name: str, *, approved: bool = False) -> None:
         if self.matches(tool_name, self.denied_tool_patterns):

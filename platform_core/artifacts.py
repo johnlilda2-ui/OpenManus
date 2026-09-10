@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
 from typing import BinaryIO
 
 import boto3
@@ -11,33 +10,45 @@ from platform_core.settings import settings
 
 class ArtifactStorage:
     def __init__(self) -> None:
-        self.root = Path(settings.artifact_root)
+        self.root = Path(settings.artifact_root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.bucket = settings.s3_bucket
         self.s3 = None
         if self.bucket:
-            self.s3 = boto3.client("s3", endpoint_url=settings.s3_endpoint_url or None, region_name=settings.s3_region or None)
+            self.s3 = boto3.client(
+                "s3",
+                endpoint_url=settings.s3_endpoint_url or None,
+                region_name=settings.s3_region or None,
+            )
+
+    def _local_path(self, storage_key: str) -> Path:
+        target = (self.root / storage_key).resolve()
+        if target == self.root or self.root not in target.parents:
+            raise ValueError("Invalid artifact storage key")
+        return target
 
     def put(self, storage_key: str, stream: BinaryIO) -> int:
         if self.s3:
             self.s3.upload_fileobj(stream, self.bucket, storage_key)
             return 0
-        target = self.root / storage_key
+        target = self._local_path(storage_key)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as output:
-            shutil.copyfileobj(stream, output, length=1024 * 1024)
+            stream.seek(0)
+            while chunk := stream.read(1024 * 1024):
+                output.write(chunk)
         return target.stat().st_size
 
     def open(self, storage_key: str):
         if self.s3:
             return None
-        return (self.root / storage_key).open("rb")
+        return self._local_path(storage_key).open("rb")
 
     def delete(self, storage_key: str) -> None:
         if self.s3:
             self.s3.delete_object(Bucket=self.bucket, Key=storage_key)
             return
-        target = self.root / storage_key
+        target = self._local_path(storage_key)
         if target.exists():
             target.unlink()
 
