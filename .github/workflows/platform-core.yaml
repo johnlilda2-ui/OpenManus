@@ -99,4 +99,6 @@ jobs:
           echo
           cat /tmp/openmanus-api.log
       - name: Platform tests
+        env:
+          PYTHONPATH: .
         run: pytest -q tests/platform_core
