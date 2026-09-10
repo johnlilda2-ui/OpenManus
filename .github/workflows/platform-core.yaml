@@ -53,6 +53,7 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379/0
       OPENMANUS_JWT_SECRET: ci-only-secret
       OPENMANUS_SANDBOX_ENABLED: "false"
+      OPENMANUS_RATE_LIMIT_FAIL_OPEN: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,5 +65,26 @@ jobs:
         run: python -m compileall -q app platform_core alembic
       - name: Apply migrations
         run: alembic upgrade head
+      - name: API smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          uvicorn platform_core.api:app --host 127.0.0.1 --port 8000 > /tmp/openmanus-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/healthz
+          TOKEN=$(curl -fsS -X POST http://127.0.0.1:8000/v1/auth/register -H 'Content-Type: application/json' -d '{"email":"ci@example.com","password":"StrongPass123!"}' | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          PROJECT=$(curl -fsS -X POST http://127.0.0.1:8000/v1/projects -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"name":"CI Project"}')
+          echo "$PROJECT"
+          PROJECT_ID=$(printf '%s' "$PROJECT" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          CONV=$(curl -fsS -X POST "http://127.0.0.1:8000/v1/projects/$PROJECT_ID/conversations" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"title":"CI Conversation"}')
+          CONV_ID=$(printf '%s' "$CONV" | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          curl -fsS -X POST "http://127.0.0.1:8000/v1/conversations/$CONV_ID/tasks" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"prompt":"integration test"}'
+          echo
+          cat /tmp/openmanus-api.log
       - name: Platform tests
         run: pytest -q tests/platform_core
