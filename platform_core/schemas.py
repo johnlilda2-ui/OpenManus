@@ -53,9 +53,9 @@ class ProjectPolicyResponse(BaseModel):
 
 
 class ProjectPolicyUpdate(BaseModel):
-    allowed_tool_patterns: list[str] = Field(default_factory=list)
-    denied_tool_patterns: list[str] = Field(default_factory=list)
-    approval_required_patterns: list[str] = Field(default_factory=list)
+    allowed_tool_patterns: list[str] = Field(min_length=1, max_length=100)
+    denied_tool_patterns: list[str] = Field(default_factory=list, max_length=100)
+    approval_required_patterns: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ConversationCreate(BaseModel):
