@@ -127,6 +127,19 @@ async def create_app_builder_run(
     )
 
 
+@router.post("/v1/projects/{project_id}/website-builder", response_model=AppBuilderResponse, status_code=202)
+async def create_website_builder_run(
+    project_id: str,
+    payload: AppBuilderCreate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> AppBuilderResponse:
+    website_payload = payload.model_copy(update={"mode": "website"})
+    if website_payload.name.strip() in {"", "AI App Builder"}:
+        website_payload = website_payload.model_copy(update={"name": "AI Website Builder"})
+    return await create_app_builder_run(project_id, website_payload, user, session)
+
+
 @router.get("/v1/projects/{project_id}/app-builder/runs", response_model=list[WorkflowRunDetailResponse])
 async def list_app_builder_runs(
     project_id: str,
