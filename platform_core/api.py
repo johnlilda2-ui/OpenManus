@@ -1,35 +1,62 @@
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from redis.asyncio import from_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.auth import create_access_token, get_current_user, hash_password, verify_password
 from platform_core.database import SessionLocal, get_db, init_db
 from platform_core.events import add_audit_event, add_task_event
-from platform_core.models import Conversation, Message, Project, Task, TaskEvent, User
+from platform_core.models import Conversation, Message, Project, Task, TaskEvent, Tenant, TenantMember, User
 from platform_core.queue import enqueue_task
+from platform_core.rate_limit import RateLimitExceeded, check_rate_limit
 from platform_core.schemas import ConversationCreate, ConversationResponse, LoginRequest, MessageResponse, ProjectCreate, ProjectResponse, RegisterRequest, TaskCreate, TaskEventResponse, TaskResponse, TokenResponse, UserResponse
 from platform_core.settings import settings
 from platform_core.usage import check_quota
 from platform_core.extra_api import router as extra_router
+from platform_core.tenant_api import router as tenant_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await init_db()
+    if settings.auto_create_db:
+        await init_db()
     yield
 
 
-app = FastAPI(title="OpenManus Operational Platform", version="0.3.0", description="Persistent control plane around the OpenManus agent engine.", lifespan=lifespan)
+app = FastAPI(title="OpenManus Operational Platform", version="0.4.0", description="Persistent control plane around the OpenManus agent engine.", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(extra_router)
+app.include_router(tenant_router)
+
+
+@app.middleware("http")
+async def enforce_rate_limit(request: Request, call_next):
+    path = request.url.path
+    if path in {"/", "/healthz", "/docs", "/openapi.json", "/redoc"} or path.startswith("/static/"):
+        return await call_next(request)
+    identity = request.headers.get("Authorization") or (request.client.host if request.client else "anonymous")
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    limit = settings.rate_limit_auth_per_minute if path.startswith("/v1/auth/") else settings.rate_limit_per_minute
+    redis = from_url(settings.redis_url, decode_responses=True)
+    try:
+        await check_rate_limit(redis, key=key, limit=limit)
+    except RateLimitExceeded as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": str(exc.retry_after)})
+    except Exception:
+        if not settings.rate_limit_fail_open:
+            return JSONResponse({"detail": "Rate limiting service unavailable"}, status_code=503)
+    finally:
+        await redis.aclose()
+    return await call_next(request)
 
 
 def require_owned_project(project: Project | None, user: User) -> Project:
@@ -103,6 +130,11 @@ async def create_project(payload: ProjectCreate, user: User = Depends(get_curren
     project = Project(owner_id=user.id, name=payload.name.strip(), description=payload.description)
     session.add(project)
     await session.flush()
+    tenant = Tenant(name=project.name)
+    session.add(tenant)
+    await session.flush()
+    project.tenant_id = tenant.id
+    session.add(TenantMember(tenant_id=tenant.id, user_id=user.id, role="owner"))
     await get_or_create_policy(session, project.id)
     from platform_core.usage import get_or_create_quota
     await get_or_create_quota(session, project.id)
