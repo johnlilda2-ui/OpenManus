@@ -23,7 +23,12 @@ async def list_members(project_id: str, user: User = Depends(get_current_user), 
     project = await get_project(session, project_id, user, "viewer")
     if project.tenant_id is None:
         return [{"user_id": project.owner_id, "email": user.email, "role": "owner"}]
-    rows = await session.scalars(select(TenantMember, User).join(User, User.id == TenantMember.user_id).where(TenantMember.tenant_id == project.tenant_id).order_by(TenantMember.role.desc(), User.email.asc()))
+    rows = await session.execute(
+        select(TenantMember, User)
+        .join(User, User.id == TenantMember.user_id)
+        .where(TenantMember.tenant_id == project.tenant_id)
+        .order_by(TenantMember.role.desc(), User.email.asc())
+    )
     result = []
     for member, member_user in rows.all():
         result.append({"user_id": member.user_id, "email": member_user.email, "role": member.role})
