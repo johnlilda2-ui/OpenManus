@@ -14,14 +14,15 @@ from sqlalchemy import select, update
 
 from app.agent.base import AgentState
 from app.schema import Memory
+from platform_core.approvals import create_or_get_workflow_approval
 from platform_core.artifacts import storage
 from platform_core.bootstrap import resolve_runtime_secrets
 from platform_core.database import SessionLocal, init_db
 from platform_core.events import add_audit_event, add_workflow_event
 from platform_core.memory import build_context, search_knowledge, search_memory
 from platform_core.model_router import create_llm, resolve_profile
-from platform_core.models import Artifact, Project, ProjectPolicy, Workflow, WorkflowRun, WorkflowStepRun
-from platform_core.policy import PolicyToolBroker, ToolPolicy
+from platform_core.models import ApprovalRequest, Artifact, Project, ProjectPolicy, Workflow, WorkflowRun, WorkflowStepRun
+from platform_core.policy import PolicyToolBroker, ToolApprovalRequired, ToolPolicy
 from platform_core.queue import enqueue_app_builder
 from platform_core.settings import settings
 from platform_core.workflows import get_or_create_step_run, render_step_prompt
@@ -30,7 +31,7 @@ from platform_core.worker import PolicyManus
 logger = logging.getLogger("openmanus-app-builder-worker")
 
 
-async def _create_agent(policy: ToolPolicy, role: str, model_profile: str | None):
+async def _create_agent(policy: ToolPolicy, role: str, model_profile: str | None, approved_tools: set[str]):
     resolve_runtime_secrets()
     llm = create_llm(role, model_profile)
     if settings.sandbox_enabled:
@@ -43,13 +44,12 @@ async def _create_agent(policy: ToolPolicy, role: str, model_profile: str | None
         return await PolicySandboxManus.create(
             llm=llm,
             policy_broker=PolicyToolBroker(policy),
-            approved_tools=set(),
+            approved_tools=approved_tools,
         )
-    class_builder = PolicyManus
-    return await class_builder.create(
+    return await PolicyManus.create(
         llm=llm,
         policy_broker=PolicyToolBroker(policy),
-        approved_tools=set(),
+        approved_tools=approved_tools,
     )
 
 
@@ -183,6 +183,16 @@ async def _enriched_prompt(session, run: WorkflowRun, prompt: str) -> str:
     return build_context(prompt=prompt, recent_messages=[], memories=memories, documents=documents)
 
 
+async def _approved_tools(session, run_id: str) -> set[str]:
+    rows = await session.scalars(
+        select(ApprovalRequest.tool_name).where(
+            ApprovalRequest.workflow_run_id == run_id,
+            ApprovalRequest.status == "approved",
+        )
+    )
+    return set(rows.all())
+
+
 async def process_builder_run(run_id: str) -> None:
     agent = None
     try:
@@ -218,6 +228,7 @@ async def process_builder_run(run_id: str) -> None:
                 role = str(spec.get("role") or "builder")
                 model_profile = spec.get("model_profile")
                 max_attempts = int(spec.get("max_attempts", 1))
+                approved_tools = await _approved_tools(session, run.id)
                 step = await get_or_create_step_run(
                     session,
                     run=run,
@@ -234,10 +245,11 @@ async def process_builder_run(run_id: str) -> None:
                 enriched = await _enriched_prompt(session, run, prompt)
                 await session.commit()
 
-            agent = await _create_agent(policy, role, model_profile) if agent is None else agent
+            agent = await _create_agent(policy, role, model_profile, approved_tools) if agent is None else agent
             _reset_agent(agent, role, model_profile)
 
             completed = False
+            blocked_by_approval = False
             last_error = ""
             result = ""
             for attempt in range(1, max_attempts + 1):
@@ -275,6 +287,45 @@ async def process_builder_run(run_id: str) -> None:
                 try:
                     result = await agent.run(enriched)
                     completed = True
+                except ToolApprovalRequired as exc:
+                    blocked_by_approval = True
+                    async with SessionLocal() as session:
+                        run = await session.get(WorkflowRun, run_id)
+                        approval = await create_or_get_workflow_approval(
+                            session,
+                            workflow_run_id=run_id,
+                            project_id=run.project_id,
+                            tool_name=exc.tool_name,
+                            reason=exc.reason,
+                        )
+                        run.status = "builder_awaiting_approval"
+                        run.error = None
+                        await add_workflow_event(
+                            session,
+                            run_id,
+                            "approval.required",
+                            {
+                                "status": run.status,
+                                "approval_id": approval.id,
+                                "tool": exc.tool_name,
+                                "reason": exc.reason,
+                                "step_index": step_index,
+                            },
+                        )
+                        await add_audit_event(
+                            session,
+                            "approval.requested",
+                            actor_user_id=run.owner_id,
+                            project_id=run.project_id,
+                            metadata={
+                                "approval_id": approval.id,
+                                "tool": exc.tool_name,
+                                "workflow_run_id": run.id,
+                                "step_index": step_index,
+                            },
+                        )
+                        await session.commit()
+                    return
                 except Exception as exc:
                     last_error = str(exc)
                     completed = False
@@ -287,6 +338,8 @@ async def process_builder_run(run_id: str) -> None:
                 step_input_tokens = max(0, after_input - before_input)
                 step_output_tokens = max(0, after_output - before_output)
 
+                if blocked_by_approval:
+                    return
                 if completed:
                     async with SessionLocal() as session:
                         run = await session.get(WorkflowRun, run_id)
