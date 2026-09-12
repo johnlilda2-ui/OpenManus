@@ -3,13 +3,13 @@ import asyncio
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from platform_core import worker
 from platform_core.approvals import create_or_get_workflow_approval
 from platform_core.database import Base
 from platform_core.models import Project, Tenant, TenantMember, User, Workflow, WorkflowRun
 from platform_core.policy import ToolPolicy
 from platform_core.schemas import ApprovalResponse
 from platform_core.tenant_api import list_members
-from platform_core import worker
 
 
 @pytest.mark.asyncio
@@ -39,8 +39,8 @@ async def test_list_members_returns_joined_user_rows():
         rows = await list_members(project.id, user=owner, session=session)
 
     assert rows == [
-        {"user_id": member.id, "email": member.email, "role": "member"},
         {"user_id": owner.id, "email": owner.email, "role": "owner"},
+        {"user_id": member.id, "email": member.email, "role": "member"},
     ]
     await engine.dispose()
 
