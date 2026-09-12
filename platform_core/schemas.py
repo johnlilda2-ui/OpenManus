@@ -62,7 +62,8 @@ class ProjectPolicyUpdate(BaseModel):
 class ApprovalResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    task_id: str
+    task_id: str | None
+    workflow_run_id: str | None
     project_id: str
     tool_name: str
     reason: str
