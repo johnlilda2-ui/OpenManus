@@ -10,6 +10,13 @@ from app.sandbox.client import SANDBOX_CLIENT
 from app.schema import ROLE_TYPE, AgentState, Memory, Message
 
 
+def _default_llm() -> LLM:
+    """Build the platform-routed LLM, including automatic escalation when enabled."""
+    from platform_core.model_router import create_llm
+
+    return create_llm("default")
+
+
 class BaseAgent(BaseModel, ABC):
     """Abstract base class for managing agent state and execution.
 
@@ -30,7 +37,7 @@ class BaseAgent(BaseModel, ABC):
     )
 
     # Dependencies
-    llm: LLM = Field(default_factory=LLM, description="Language model instance")
+    llm: LLM = Field(default_factory=_default_llm, description="Language model instance")
     memory: Memory = Field(default_factory=Memory, description="Agent's memory store")
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
@@ -50,14 +57,14 @@ class BaseAgent(BaseModel, ABC):
     def initialize_agent(self) -> "BaseAgent":
         """Initialize agent with default settings if not provided."""
         if self.llm is None or not isinstance(self.llm, LLM):
-            self.llm = LLM(config_name=self.name.lower())
+            self.llm = _default_llm()
         if not isinstance(self.memory, Memory):
             self.memory = Memory()
         return self
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):
-        """Context manager for safe agent state transitions.
+        """Context manager for safe state transitions.
 
         Args:
             new_state: The state to transition to during the context.
@@ -76,10 +83,10 @@ class BaseAgent(BaseModel, ABC):
         try:
             yield
         except Exception as e:
-            self.state = AgentState.ERROR  # Transition to ERROR on failure
+            self.state = AgentState.ERROR
             raise e
         finally:
-            self.state = previous_state  # Revert to previous state
+            self.state = previous_state
 
     def update_memory(
         self,
@@ -88,17 +95,7 @@ class BaseAgent(BaseModel, ABC):
         base64_image: Optional[str] = None,
         **kwargs,
     ) -> None:
-        """Add a message to the agent's memory.
-
-        Args:
-            role: The role of the message sender (user, system, assistant, tool).
-            content: The message content.
-            base64_image: Optional base64 encoded image.
-            **kwargs: Additional arguments (e.g., tool_call_id for tool messages).
-
-        Raises:
-            ValueError: If the role is unsupported.
-        """
+        """Add a message to the agent's memory."""
         message_map = {
             "user": Message.user_message,
             "system": Message.system_message,
@@ -109,22 +106,11 @@ class BaseAgent(BaseModel, ABC):
         if role not in message_map:
             raise ValueError(f"Unsupported message role: {role}")
 
-        # Create message with appropriate parameters based on role
         kwargs = {"base64_image": base64_image, **(kwargs if role == "tool" else {})}
         self.memory.add_message(message_map[role](content, **kwargs))
 
     async def run(self, request: Optional[str] = None) -> str:
-        """Execute the agent's main loop asynchronously.
-
-        Args:
-            request: Optional initial user request to process.
-
-        Returns:
-            A string summarizing the execution results.
-
-        Raises:
-            RuntimeError: If the agent is not in IDLE state at start.
-        """
+        """Execute the agent's main loop asynchronously."""
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
@@ -140,7 +126,6 @@ class BaseAgent(BaseModel, ABC):
                 logger.info(f"Executing step {self.current_step}/{self.max_steps}")
                 step_result = await self.step()
 
-                # Check for stuck state
                 if self.is_stuck():
                     self.handle_stuck_state()
 
@@ -162,8 +147,7 @@ class BaseAgent(BaseModel, ABC):
 
     def handle_stuck_state(self):
         """Handle stuck state by adding a prompt to change strategy"""
-        stuck_prompt = "\
-        Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
+        stuck_prompt = "Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
         self.next_step_prompt = f"{stuck_prompt}\n{self.next_step_prompt}"
         logger.warning(f"Agent detected stuck state. Added prompt: {stuck_prompt}")
 
@@ -176,7 +160,6 @@ class BaseAgent(BaseModel, ABC):
         if not last_message.content:
             return False
 
-        # Count identical content occurrences
         duplicate_count = sum(
             1
             for msg in reversed(self.memory.messages[:-1])
