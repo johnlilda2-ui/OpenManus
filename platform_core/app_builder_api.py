@@ -156,6 +156,7 @@ async def list_app_builder_runs(
             WorkflowRun.status.in_([
                 "builder_queued",
                 "builder_running",
+                "builder_awaiting_approval",
                 "builder_completed",
                 "builder_failed",
                 "builder_cancelled",
@@ -177,7 +178,10 @@ async def get_app_builder_run(
     if run is None or not run.status.startswith("builder_"):
         raise HTTPException(status_code=404, detail="App Builder run not found")
     await project_access(session, run.project_id, user, "viewer")
-    return WorkflowRunDetailResponse.model_validate(run)
+    rows = await session.scalars(
+        select(WorkflowStepRun).where(WorkflowStepRun.workflow_run_id == run.id).order_by(WorkflowStepRun.step_index.asc())
+    )
+    return WorkflowRunDetailResponse.model_validate(run).model_copy(update={"steps": [WorkflowRunDetailResponse.model_fields["steps"].annotation.__args__[0].model_validate(row) for row in rows.all()]})
 
 
 @router.get("/v1/app-builder/runs/{run_id}/preview")
@@ -240,10 +244,12 @@ async def cancel_app_builder_run(
     if run.status in {"builder_completed", "builder_failed", "builder_cancelled"}:
         return WorkflowRunDetailResponse.model_validate(run)
     run.cancel_requested = True
-    if run.status == "builder_queued":
+    if run.status in {"builder_queued", "builder_awaiting_approval"}:
         run.status = "builder_cancelled"
         run.completed_at = datetime.now(timezone.utc)
         await add_workflow_event(session, run.id, "builder.cancelled", {"status": run.status})
+    else:
+        await add_workflow_event(session, run.id, "builder.cancel_requested", {"status": run.status})
     await add_audit_event(
         session,
         "builder.cancel_requested",
