@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from pydantic import Field
@@ -36,6 +37,31 @@ class PolicyManus(Manus):
         return await super().execute_tool(command)
 
 
+class _CIEnvironmentLLM:
+    total_input_tokens = 0
+    total_completion_tokens = 0
+
+
+class _CIEnvironmentAgent:
+    """Deterministic worker-only agent used by CI to exercise the Redis/worker path without provider credentials."""
+
+    def __init__(self) -> None:
+        self.llm = _CIEnvironmentLLM()
+
+    async def run(self, request: str) -> str:
+        self.llm.total_input_tokens = max(1, len(request) // 4)
+        self.llm.total_completion_tokens = 8
+        await asyncio.sleep(0.05)
+        return f"CI fake agent completed: {request[:200]}"
+
+    async def cleanup(self) -> None:
+        return None
+
+
+class _CancellationRequested(Exception):
+    pass
+
+
 async def get_project_policy(session, project_id: str) -> ToolPolicy:
     policy = await session.scalar(select(ProjectPolicy).where(ProjectPolicy.project_id == project_id))
     return ToolPolicy.from_model(policy)
@@ -59,6 +85,8 @@ async def build_agent_prompt(session, *, owner_id: str, project_id: str, convers
 
 
 async def create_agent(policy: ToolPolicy, approved_tools: set[str]):
+    if os.getenv("PLATFORM_CORE_CI_FAKE_LLM", "").lower() in {"1", "true", "yes", "on"}:
+        return _CIEnvironmentAgent()
     resolve_runtime_secrets()
     if settings.sandbox_enabled:
         if settings.sandbox_backend != "daytona":
@@ -71,6 +99,29 @@ async def create_agent(policy: ToolPolicy, approved_tools: set[str]):
 def usage_snapshot(agent) -> tuple[int, int]:
     llm = agent.llm
     return int(getattr(llm, "total_input_tokens", 0)), int(getattr(llm, "total_completion_tokens", 0))
+
+
+async def _cancel_requested(task_id: str) -> bool:
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+        return bool(task and task.cancel_requested)
+
+
+async def _run_agent_with_cancellation(agent, prompt: str, task_id: str) -> tuple[str, bool]:
+    execution = asyncio.create_task(agent.run(prompt))
+    while not execution.done():
+        try:
+            result = await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)
+            return result, False
+        except asyncio.TimeoutError:
+            if await _cancel_requested(task_id):
+                execution.cancel()
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                raise _CancellationRequested
+    return await execution, False
 
 
 async def claim_queued_task(task_id: str | None = None) -> str | None:
@@ -96,13 +147,31 @@ async def process_task(task_id: str) -> None:
             task = await session.get(Task, task_id)
             if task is None:
                 return
+            if task.cancel_requested:
+                task.status = "cancelled"
+                task.completed_at = datetime.now(timezone.utc)
+                await add_task_event(session, task.id, "task.cancelled", {"status": task.status})
+                await session.commit()
+                return
             input_prompt = task.prompt
             policy = await get_project_policy(session, task.project_id)
             approved_tools = await get_approved_tools(session, task.id)
             prompt = await build_agent_prompt(session, owner_id=task.owner_id, project_id=task.project_id, conversation_id=task.conversation_id, prompt=task.prompt)
         agent = await create_agent(policy, approved_tools)
         before_input, before_output = usage_snapshot(agent)
-        result = await agent.run(prompt)
+        try:
+            result, _ = await _run_agent_with_cancellation(agent, prompt, task_id)
+        except _CancellationRequested:
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task is not None:
+                    task.result = None
+                    task.status = "cancelled"
+                    task.completed_at = datetime.now(timezone.utc)
+                    await add_task_event(session, task.id, "task.cancelled", {"status": task.status, "interrupted": True})
+                    await add_audit_event(session, "task.cancelled", actor_user_id=task.owner_id, project_id=task.project_id, task_id=task.id)
+                    await session.commit()
+            return
         after_input, after_output = usage_snapshot(agent)
         provider_input = max(0, after_input - before_input)
         provider_output = max(0, after_output - before_output)
