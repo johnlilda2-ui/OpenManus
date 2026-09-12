@@ -123,7 +123,8 @@ class AuditEvent(Base):
 class ApprovalRequest(Base):
     __tablename__ = "approval_requests"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    workflow_run_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     tool_name: Mapped[str] = mapped_column(String(200))
     reason: Mapped[str] = mapped_column(String(1000))
