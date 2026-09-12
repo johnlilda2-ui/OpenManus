@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import tomllib
 from pathlib import Path
@@ -44,7 +45,7 @@ class SearchSettings(BaseModel):
     )
     retry_delay: int = Field(
         default=60,
-        description="Seconds to wait before retrying all engines again after they all fail",
+        description="Seconds to wait before retrying all engines again after the first fail",
     )
     max_retries: int = Field(
         default=3,
@@ -116,9 +117,6 @@ class DaytonaSettings(BaseModel):
         "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf",
         description="",
     )
-    # sandbox_id: Optional[str] = Field(
-    #     None, description="ID of the daytona sandbox to use, if any"
-    # )
     VNC_password: Optional[str] = Field(
         "123456", description="VNC password for the vnc service in sandbox"
     )
@@ -142,7 +140,7 @@ class MCPSettings(BaseModel):
         "app.mcp.server", description="Module reference for the MCP server"
     )
     servers: Dict[str, MCPServerConfig] = Field(
-        default_factory=dict, description="MCP server configurations"
+        default_factory=dict, description="Server configurations"
     )
 
     @classmethod
@@ -230,6 +228,10 @@ class Config:
         with config_path.open("rb") as f:
             return tomllib.load(f)
 
+    @staticmethod
+    def _env(name: str) -> str:
+        return os.getenv(name, "").strip()
+
     def _load_initial_config(self):
         raw_config = self._load_config()
         base_llm = raw_config.get("llm", {})
@@ -237,23 +239,49 @@ class Config:
             k: v for k, v in raw_config.get("llm", {}).items() if isinstance(v, dict)
         }
 
+        global_model = self._env("OPENMANUS_LLM_MODEL")
+        global_base_url = self._env("OPENMANUS_LLM_BASE_URL")
+        global_api_type = self._env("OPENMANUS_LLM_API_TYPE")
+        global_api_version = self._env("OPENMANUS_LLM_API_VERSION")
+
         default_settings = {
-            "model": base_llm.get("model"),
-            "base_url": base_llm.get("base_url"),
+            "model": global_model or base_llm.get("model"),
+            "base_url": global_base_url or base_llm.get("base_url"),
             "api_key": base_llm.get("api_key"),
             "max_tokens": base_llm.get("max_tokens", 4096),
             "max_input_tokens": base_llm.get("max_input_tokens"),
             "temperature": base_llm.get("temperature", 1.0),
-            "api_type": base_llm.get("api_type", ""),
-            "api_version": base_llm.get("api_version", ""),
+            "api_type": global_api_type or base_llm.get("api_type", ""),
+            "api_version": global_api_version or base_llm.get("api_version", ""),
         }
+
+        configured_profiles = {}
+        for name, override_config in llm_overrides.items():
+            profile_env = name.upper()
+            profile_settings = {**default_settings, **override_config}
+            profile_model = self._env(f"OPENMANUS_LLM_MODEL_{profile_env}")
+            profile_base_url = self._env(f"OPENMANUS_LLM_BASE_URL_{profile_env}")
+            profile_api_type = self._env(f"OPENMANUS_LLM_API_TYPE_{profile_env}")
+            profile_api_version = self._env(f"OPENMANUS_LLM_API_VERSION_{profile_env}")
+            if profile_model:
+                profile_settings["model"] = profile_model
+            elif global_model:
+                profile_settings["model"] = global_model
+            if profile_base_url:
+                profile_settings["base_url"] = profile_base_url
+            elif global_base_url:
+                profile_settings["base_url"] = global_base_url
+            if profile_api_type:
+                profile_settings["api_type"] = profile_api_type
+            if profile_api_version:
+                profile_settings["api_version"] = profile_api_version
+            configured_profiles[name] = profile_settings
 
         # handle browser config.
         browser_config = raw_config.get("browser", {})
         browser_settings = None
 
         if browser_config:
-            # handle proxy settings.
             proxy_config = browser_config.get("proxy", {})
             proxy_settings = None
 
@@ -266,18 +294,15 @@ class Config:
                     }
                 )
 
-            # filter valid browser config parameters.
             valid_browser_params = {
                 k: v
                 for k, v in browser_config.items()
                 if k in BrowserSettings.__annotations__ and v is not None
             }
 
-            # if there is proxy settings, add it to the parameters.
             if proxy_settings:
                 valid_browser_params["proxy"] = proxy_settings
 
-            # only create BrowserSettings when there are valid parameters.
             if valid_browser_params:
                 browser_settings = BrowserSettings(**valid_browser_params)
 
@@ -299,7 +324,6 @@ class Config:
         mcp_config = raw_config.get("mcp", {})
         mcp_settings = None
         if mcp_config:
-            # Load server configurations from JSON
             mcp_config["servers"] = MCPSettings.load_server_config()
             mcp_settings = MCPSettings(**mcp_config)
         else:
@@ -313,10 +337,7 @@ class Config:
         config_dict = {
             "llm": {
                 "default": default_settings,
-                **{
-                    name: {**default_settings, **override_config}
-                    for name, override_config in llm_overrides.items()
-                },
+                **configured_profiles,
             },
             "sandbox": sandbox_settings,
             "browser_config": browser_settings,
