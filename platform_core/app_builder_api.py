@@ -178,10 +178,7 @@ async def get_app_builder_run(
     if run is None or not run.status.startswith("builder_"):
         raise HTTPException(status_code=404, detail="App Builder run not found")
     await project_access(session, run.project_id, user, "viewer")
-    rows = await session.scalars(
-        select(WorkflowStepRun).where(WorkflowStepRun.workflow_run_id == run.id).order_by(WorkflowStepRun.step_index.asc())
-    )
-    return WorkflowRunDetailResponse.model_validate(run).model_copy(update={"steps": [WorkflowRunDetailResponse.model_fields["steps"].annotation.__args__[0].model_validate(row) for row in rows.all()]})
+    return WorkflowRunDetailResponse.model_validate(run)
 
 
 @router.get("/v1/app-builder/runs/{run_id}/preview")
