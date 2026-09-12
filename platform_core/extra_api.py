@@ -15,10 +15,10 @@ from platform_core.approvals import decide_approval
 from platform_core.artifacts import storage
 from platform_core.auth import get_current_user
 from platform_core.database import get_db
-from platform_core.events import add_audit_event, add_task_event
-from platform_core.models import ApprovalRequest, Artifact, KnowledgeDocument, MemoryEntry, Project, ProjectPolicy, ProjectQuota, Task, User
+from platform_core.events import add_audit_event, add_task_event, add_workflow_event
+from platform_core.models import ApprovalRequest, Artifact, KnowledgeDocument, MemoryEntry, Project, ProjectPolicy, ProjectQuota, Task, User, WorkflowRun
 from platform_core.permissions import PermissionDenied, require_project_role
-from platform_core.queue import enqueue_task
+from platform_core.queue import enqueue_app_builder, enqueue_task
 from platform_core.schemas import ApprovalResponse, ArtifactResponse, KnowledgeCreate, KnowledgeResponse, MemoryCreate, MemoryResponse, ProjectPolicyResponse, ProjectPolicyUpdate, ProjectQuotaResponse, ProjectQuotaUpdate, UsageSummaryResponse
 from platform_core.settings import settings
 from platform_core.usage import current_usage, get_or_create_quota
@@ -82,8 +82,11 @@ async def decide_approval_request(approval_id: str, approved: bool, user: User, 
     project = await project_access(session, approval.project_id, user, "admin")
     if approval.status != "pending":
         return ApprovalResponse.model_validate(approval)
+
     await decide_approval(session, approval, decided_by=user.id, approved=approved)
-    task = await session.get(Task, approval.task_id)
+    task = await session.get(Task, approval.task_id) if approval.task_id else None
+    workflow_run = await session.get(WorkflowRun, approval.workflow_run_id) if approval.workflow_run_id else None
+
     if task is not None:
         if approved:
             task.status = "queued"
@@ -94,10 +97,52 @@ async def decide_approval_request(approval_id: str, approved: bool, user: User, 
             task.completed_at = datetime.now(timezone.utc)
             await add_task_event(session, task.id, "approval.denied", {"approval_id": approval.id, "tool": approval.tool_name, "status": task.status})
         await add_audit_event(session, "approval.decided", actor_user_id=user.id, project_id=project.id, task_id=task.id, metadata={"approval_id": approval.id, "approved": approved, "tool": approval.tool_name})
+
+    if workflow_run is not None:
+        if approved:
+            workflow_run.status = "builder_queued"
+            workflow_run.error = None
+            await add_workflow_event(
+                session,
+                workflow_run.id,
+                "builder.approval_granted",
+                {"approval_id": approval.id, "tool": approval.tool_name, "status": workflow_run.status},
+            )
+        else:
+            workflow_run.status = "builder_failed"
+            workflow_run.error = f"Tool approval denied: {approval.tool_name}"
+            workflow_run.completed_at = datetime.now(timezone.utc)
+            await add_workflow_event(
+                session,
+                workflow_run.id,
+                "builder.approval_denied",
+                {"approval_id": approval.id, "tool": approval.tool_name, "status": workflow_run.status},
+            )
+        await add_audit_event(
+            session,
+            "approval.decided",
+            actor_user_id=user.id,
+            project_id=project.id,
+            metadata={
+                "approval_id": approval.id,
+                "approved": approved,
+                "tool": approval.tool_name,
+                "workflow_run_id": workflow_run.id,
+            },
+        )
+
+    if task is None and workflow_run is None:
+        raise HTTPException(status_code=409, detail="Approval target no longer exists")
+
     await session.commit()
     if approved and task is not None:
         try:
             await enqueue_task(task.id)
+        except Exception:
+            pass
+    if approved and workflow_run is not None:
+        try:
+            await enqueue_app_builder(workflow_run.id)
         except Exception:
             pass
     return ApprovalResponse.model_validate(approval)
