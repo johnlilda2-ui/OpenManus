@@ -78,10 +78,11 @@ temperature = 0.2
 # api_version = "YOUR_API_VERSION"
 
 # Daytona-backed production sandbox configuration.
+# Use the EU target so the service does not request declarative builds in the US region.
 [daytona]
 daytona_api_key = "secret://openmanus_daytona_api_key"
 daytona_server_url = "https://app.daytona.io/api"
-daytona_target = "us"
+daytona_target = "eu"
 sandbox_image_name = "whitezxj/sandbox:0.1.0"
 sandbox_entrypoint = "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf"
 VNC_password = "secret://openmanus_vnc_password"
