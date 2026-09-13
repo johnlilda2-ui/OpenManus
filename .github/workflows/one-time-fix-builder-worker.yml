@@ -1,0 +1,66 @@
+name: One-time builder hotfix
+
+on:
+  push:
+    branches:
+      - platform-core-v1
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout platform-core-v1
+        uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+
+      - name: Apply builder hotfixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Fix the NameError that currently aborts a successful builder step.
+          path = Path("platform_core/app_builder_worker.py")
+          text = path.read_text(encoding="utf-8")
+          marker = "from platform_core.settings import settings\n"
+          usage_import = "from platform_core.usage import record_usage\n"
+          if usage_import not in text:
+              if marker not in text:
+                  raise SystemExit("Expected settings import marker not found in app_builder_worker.py")
+              text = text.replace(marker, marker + usage_import, 1)
+          path.write_text(text, encoding="utf-8")
+
+          # Stop ordinary builder instructions from triggering the expensive
+          # GPT-5.6 Sol escalation merely because they contain generic words
+          # such as architecture, authentication, production, or security.
+          path = Path("platform_core/model_router.py")
+          text = path.read_text(encoding="utf-8")
+          old_threshold = 'threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "20000"))'
+          new_threshold = 'threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "100000"))'
+          if old_threshold in text:
+              text = text.replace(old_threshold, new_threshold, 1)
+
+          old_terms = '''    critical_terms = (\n        "production",\n        "security",\n        "authentication",\n        "authorization",\n        "database migration",\n        "data loss",\n        "payment",\n        "credentials",\n        "critical incident",\n        "incident response",\n        "architecture",\n        "deploy to production",\n    )'''
+          new_terms = '''    critical_terms = (\n        "data loss",\n        "critical incident",\n        "incident response",\n        "deploy to production",\n    )'''
+          if old_terms not in text:
+              raise SystemExit("Expected escalation term block not found in model_router.py")
+          text = text.replace(old_terms, new_terms, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          python -m py_compile platform_core/app_builder_worker.py platform_core/model_router.py
+
+      - name: Commit hotfix and remove this temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/one-time-fix-builder-worker.yml
+          git add platform_core/app_builder_worker.py platform_core/model_router.py .github/workflows/one-time-fix-builder-worker.yml
+          git commit -m "fix: record builder usage and prevent false Sol escalation"
+          git push origin HEAD:platform-core-v1
