@@ -1,0 +1,36 @@
+name: Hotfix builder agent step budgets
+on:
+  push:
+    branches: [platform-core-v1]
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch builder agent budgets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('platform_core/app_builder_worker.py')
+          s = p.read_text()
+          old = '''def _reset_agent(agent, role: str, model_profile: str | None) -> None:\n    agent.llm = create_llm(role, model_profile)\n    agent.state = AgentState.IDLE\n    agent.current_step = 0\n    agent.memory = Memory()\n'''
+          new = '''def _builder_agent_step_budget(role: str) -> int:\n    budgets = {\n        "planner": 8,\n        "designer": 10,\n        "builder": 12,\n        "tester": 10,\n        "reviewer": 8,\n        "fixer": 10,\n    }\n    return int(os.getenv("OPENMANUS_BUILDER_AGENT_MAX_STEPS", budgets.get(role, 10)))\n\n\ndef _reset_agent(agent, role: str, model_profile: str | None) -> None:\n    agent.llm = create_llm(role, model_profile)\n    agent.state = AgentState.IDLE\n    agent.current_step = 0\n    agent.max_steps = _builder_agent_step_budget(role)\n    agent.memory = Memory()\n'''
+          if old not in s:
+              raise SystemExit('reset block not found')
+          p.write_text(s.replace(old, new, 1))
+          print('patched builder agent step budgets')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add platform_core/app_builder_worker.py
+          git commit -m "fix: reduce builder agent step budgets" || exit 0
+          git push
