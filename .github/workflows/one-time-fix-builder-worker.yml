@@ -1,4 +1,4 @@
-name: One-time fix builder worker queue
+name: One-time builder hotfix
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  fix-builder-worker:
+  hotfix:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -18,32 +18,49 @@ jobs:
         with:
           ref: platform-core-v1
 
-      - name: Patch worker queue dispatch
+      - name: Apply builder runtime fixes
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("platform_core/worker.py")
+          # Fix missing record_usage import in the builder worker.
+          path = Path("platform_core/app_builder_worker.py")
           text = path.read_text(encoding="utf-8")
+          marker = "from platform_core.settings import settings\n"
+          import_line = "from platform_core.usage import record_usage\n"
+          if import_line not in text:
+              if marker not in text:
+                  raise SystemExit("Expected settings import marker not found in app_builder_worker.py")
+              text = text.replace(marker, marker + import_line, 1)
+              path.write_text(text, encoding="utf-8")
 
-          old = '''            item = await redis.brpop(settings.queue_name, timeout=5)\n            selected_item = item[1] if item else None\n            if selected_item:\n                if selected_item.startswith("workflow:"):\n                    claimed = await claim_workflow_run(selected_item.split(":", 1)[1])\n                    if claimed:\n                        await process_workflow_run(claimed)\n                else:\n                    task_id = selected_item.split(":", 1)[1] if selected_item.startswith("task:") else selected_item\n                    claimed = await claim_queued_task(task_id)\n                    if claimed:\n                        await process_task(claimed)\n                continue\n'''
-
-          new = '''            item = await redis.brpop(\n                settings.queue_name,\n                settings.builder_queue_name,\n                timeout=5,\n            )\n            selected_item = item[1] if item else None\n            if selected_item:\n                if selected_item.startswith("builder:"):\n                    from platform_core.app_builder_worker import claim_builder_run, process_builder_run\n\n                    builder_id = selected_item.split(":", 1)[1]\n                    claimed = await claim_builder_run(builder_id)\n                    if claimed:\n                        await process_builder_run(claimed)\n                elif selected_item.startswith("workflow:"):\n                    claimed = await claim_workflow_run(selected_item.split(":", 1)[1])\n                    if claimed:\n                        await process_workflow_run(claimed)\n                else:\n                    task_id = selected_item.split(":", 1)[1] if selected_item.startswith("task:") else selected_item\n                    claimed = await claim_queued_task(task_id)\n                    if claimed:\n                        await process_task(claimed)\n                continue\n'''
-
-          if old not in text:
-              raise SystemExit("Expected worker queue block not found; refusing to modify the file")
-
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          # Prevent ordinary builder instructions containing words such as
+          # 'architecture' or 'authentication' from automatically escalating
+          # every request to the expensive GPT-5.6 Sol model.
+          path = Path("platform_core/model_router.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              'threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "20000"))',
+              'threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "100000"))',
+              1,
+          )
+          old_terms = '''    critical_terms = (\n        "production",\n        "security",\n        "authentication",\n        "authorization",\n        "database migration",\n        "data loss",\n        "payment",\n        "credentials",\n        "critical incident",\n        "incident response",\n        "architecture",\n        "deploy to production",\n    )'''
+          new_terms = '''    critical_terms = (\n        "data loss",\n        "critical incident",\n        "incident response",\n        "deploy to production",\n    )'''
+          if old_terms not in text:
+              raise SystemExit("Expected escalation term block not found in model_router.py")
+          text = text.replace(old_terms, new_terms, 1)
+          path.write_text(text, encoding="utf-8")
           PY
 
-          python -m py_compile platform_core/worker.py
+          python -m py_compile platform_core/app_builder_worker.py platform_core/model_router.py
 
-      - name: Commit worker fix and remove one-time workflow
+      - name: Remove one-time workflow and commit fixes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add platform_core/worker.py .github/workflows/one-time-fix-builder-worker.yml
-          git commit -m "Fix worker to consume app builder queue"
+          rm -f .github/workflows/one-time-fix-builder-worker.yml
+          git add platform_core/app_builder_worker.py platform_core/model_router.py .github/workflows/one-time-fix-builder-worker.yml
+          git commit -m "fix: record builder usage and prevent false Sol escalation"
           git push origin HEAD:platform-core-v1
