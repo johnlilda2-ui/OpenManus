@@ -1,0 +1,70 @@
+name: One-time builder runtime fix
+
+on:
+  push:
+    branches: [platform-core-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-runtime:
+    if: github.actor == 'github-actions[bot]' || github.event.head_commit.message != 'fix: repair Daytona shell execution and builder cancellation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+          fetch-depth: 0
+
+      - name: Patch Daytona shell response handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/tool/sandbox/sb_shell_tool.py')
+          s = p.read_text()
+          old = '''        logs = self.sandbox.process.get_session_command_logs(\n            session_id=session_id, command_id=response.cmd_id\n        )\n\n        return {"output": logs, "exit_code": response.exit_code}\n'''
+          new = '''        logs = self.sandbox.process.get_session_command_logs(\n            session_id=session_id, command_id=response.cmd_id\n        )\n        combined_output = getattr(logs, "output", None)\n        if combined_output is None:\n            stdout = getattr(logs, "stdout", "") or ""\n            stderr = getattr(logs, "stderr", "") or ""\n            combined_output = "\\n".join(part for part in (stdout, stderr) if part)\n\n        return {"output": combined_output, "exit_code": response.exit_code}\n'''
+          if old not in s:
+              raise SystemExit('Expected Daytona logs block not found')
+          s = s.replace(old, new, 1)
+          old = '''        action: str,\n        command: str,\n        folder: Optional[str] = None,\n'''
+          new = '''        action: str,\n        command: Optional[str] = None,\n        folder: Optional[str] = None,\n'''
+          if old not in s:
+              raise SystemExit('Expected execute signature not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Patch interruptive builder cancellation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('platform_core/app_builder_worker.py')
+          s = p.read_text()
+          marker = 'logger = logging.getLogger("openmanus-app-builder-worker")\n\n\n'
+          insert = '''logger = logging.getLogger("openmanus-app-builder-worker")\n\n\nclass _BuilderCancellationRequested(Exception):\n    pass\n\n\nasync def _builder_cancel_requested(run_id: str) -> bool:\n    async with SessionLocal() as session:\n        run = await session.get(WorkflowRun, run_id)\n        return bool(run and run.cancel_requested)\n\n\nasync def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str) -> str:\n    execution = asyncio.create_task(agent.run(prompt))\n    while not execution.done():\n        try:\n            result = await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)\n            return result\n        except asyncio.TimeoutError:\n            if await _builder_cancel_requested(run_id):\n                execution.cancel()\n                try:\n                    await execution\n                except asyncio.CancelledError:\n                    pass\n                raise _BuilderCancellationRequested\n    return await execution\n\n\n'''
+          if marker not in s:
+              raise SystemExit('Builder logger marker not found')
+          s = s.replace(marker, insert, 1)
+          old = '                    result = await agent.run(enriched)\n                    completed = True\n'
+          new = '                    result = await _run_builder_agent_with_cancellation(agent, enriched, run_id)\n                    completed = True\n'
+          if old not in s:
+              raise SystemExit('Builder agent.run call not found')
+          s = s.replace(old, new, 1)
+          old = '''                except ToolApprovalRequired as exc:\n'''
+          new = '''                except _BuilderCancellationRequested:\n                    async with SessionLocal() as session:\n                        run = await session.get(WorkflowRun, run_id)\n                        step = await session.scalar(\n                            select(WorkflowStepRun).where(\n                                WorkflowStepRun.workflow_run_id == run_id,\n                                WorkflowStepRun.step_index == step_index,\n                            )\n                        )\n                        if run is not None:\n                            run.status = "builder_cancelled"\n                            run.error = None\n                            run.completed_at = datetime.now(timezone.utc)\n                            run.heartbeat_at = datetime.now(timezone.utc)\n                        if step is not None:\n                            step.status = "cancelled"\n                            step.completed_at = datetime.now(timezone.utc)\n                        await add_workflow_event(\n                            session,\n                            run_id,\n                            "builder.cancelled",\n                            {"status": "builder_cancelled", "step_index": step_index, "interrupted": True},\n                        )\n                        await session.commit()\n                    return\n                except ToolApprovalRequired as exc:\n'''
+          if old not in s:
+              raise SystemExit('ToolApprovalRequired handler not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Commit patched runtime
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/tool/sandbox/sb_shell_tool.py platform_core/app_builder_worker.py
+          git diff --cached --check
+          git commit -m "fix: repair Daytona shell execution and builder cancellation"
+          git push origin platform-core-v1
