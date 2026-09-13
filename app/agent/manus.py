@@ -12,6 +12,7 @@ from app.tool import Terminate, ToolCollection
 from app.tool.ask_human import AskHuman
 from app.tool.mcp import MCPClients, MCPClientTool
 from app.tool.python_execute import PythonExecute
+from app.tool.search.firecrawl_search import FirecrawlSearchEngine
 from app.tool.str_replace_editor import StrReplaceEditor
 from app.tool.web_search import WebSearch
 
