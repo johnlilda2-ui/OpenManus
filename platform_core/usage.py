@@ -23,8 +23,11 @@ def estimate_cost(input_tokens: int, output_tokens: int) -> float:
 async def get_or_create_quota(session: AsyncSession, project_id: str) -> ProjectQuota:
     quota = await session.scalar(select(ProjectQuota).where(ProjectQuota.project_id == project_id))
     if quota is not None:
+        if quota.monthly_token_limit < 1_000_000:
+            quota.monthly_token_limit = 1_000_000
+            await session.flush()
         return quota
-    quota = ProjectQuota(project_id=project_id)
+    quota = ProjectQuota(project_id=project_id, monthly_token_limit=1_000_000)
     session.add(quota)
     await session.flush()
     return quota
