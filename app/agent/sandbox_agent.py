@@ -71,10 +71,11 @@ class SandboxManus(ToolCallAgent):
 
     async def initialize_sandbox_tools(
         self,
-        password: str = config.daytona.VNC_password,
+        password: Optional[str] = None,
     ) -> None:
         try:
-            # 创建新沙箱
+            # Resolve the current runtime value instead of capturing a config value at import time.
+            password = password or config.daytona.VNC_password
             if password:
                 sandbox = create_sandbox(password=password)
                 self.sandbox = sandbox
