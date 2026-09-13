@@ -10,11 +10,10 @@ from app.prompt.manus import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from app.schema import Message
 from app.tool import Terminate, ToolCollection
 from app.tool.ask_human import AskHuman
+from app.tool.firecrawl_web_search import FirecrawlWebSearch
 from app.tool.mcp import MCPClients, MCPClientTool
 from app.tool.python_execute import PythonExecute
-from app.tool.search.firecrawl_search import FirecrawlSearchEngine
 from app.tool.str_replace_editor import StrReplaceEditor
-from app.tool.web_search import WebSearch
 
 
 _BROWSER_USE_SERVER_ID = "browser_use"
@@ -58,7 +57,7 @@ class Manus(ToolCallAgent):
         default_factory=lambda: ToolCollection(
             PythonExecute(),
             StrReplaceEditor(),
-            WebSearch(),
+            FirecrawlWebSearch(),
             AskHuman(),
             Terminate(),
         )
