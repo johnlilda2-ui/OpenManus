@@ -18,7 +18,44 @@ class PolicySandboxManus(SandboxManus):
     @classmethod
     async def create(cls, **kwargs) -> "PolicySandboxManus":
         instance = await super().create(**kwargs)
-        tools = [tool for tool in instance.available_tools.tools if tool.name != "sandbox_browser"]
+
+        # The builder prompts historically used the host-style workspace path
+        # (for example /app/workspace). In Daytona that path does not exist;
+        # the isolated sandbox workspace is /workspace. Create the shared
+        # project root up front and make the runtime contract explicit so all
+        # sandbox tools operate on the same filesystem.
+        try:
+            from daytona import SessionExecuteRequest
+
+            bootstrap_session = "cataron-workspace-bootstrap"
+            instance.sandbox.process.create_session(bootstrap_session)
+            response = instance.sandbox.process.execute_session_command(
+                bootstrap_session,
+                SessionExecuteRequest(
+                    command="mkdir -p /workspace/projects",
+                    run_async=False,
+                    cwd="/workspace",
+                ),
+                timeout=30,
+            )
+            if getattr(response, "exit_code", 0) not in {0, None}:
+                raise RuntimeError("Unable to initialize the Daytona workspace root")
+            instance.system_prompt = (
+                instance.system_prompt
+                + "\n\nCATARON SANDBOX RUNTIME: This task runs inside an isolated Daytona sandbox. "
+                "The writable project root is /workspace/projects. Always use /workspace/projects "
+                "for the current project. Never use /app/workspace or the host filesystem."
+            )
+        except Exception:
+            # Sandbox creation itself remains authoritative; a clear runtime
+            # error will be produced if the workspace cannot be initialized.
+            raise
+
+        tools = [
+            tool
+            for tool in instance.available_tools.tools
+            if tool.name not in {"sandbox_browser", "ask_human"}
+        ]
         instance.available_tools = ToolCollection(*tools)
         instance.available_tools.add_tools(
             SandboxVisualBrowserTool.create_with_sandbox(instance.sandbox),
