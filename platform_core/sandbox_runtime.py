@@ -1,3 +1,5 @@
+from fnmatch import fnmatchcase
+
 from pydantic import Field
 
 from app.agent.sandbox_agent import SandboxManus
@@ -7,13 +9,20 @@ from app.tool.tool_collection import ToolCollection
 from app.tool.web_search import WebSearch
 
 from platform_core.policy import PolicyToolBroker, ToolPolicy
-from platform_core.sandbox_boundary import enforce_tool_boundary
+from platform_core.sandbox_boundary import HOST_EXECUTION_PATTERNS, enforce_tool_boundary
 from platform_core.settings import settings
 
 
 class PolicySandboxManus(SandboxManus):
     policy_broker: PolicyToolBroker = Field(default_factory=lambda: PolicyToolBroker(ToolPolicy.defaults()))
     approved_tools: set[str] = Field(default_factory=set)
+
+    @staticmethod
+    def _is_host_execution_tool(tool_name: str) -> bool:
+        return any(
+            fnmatchcase(tool_name, pattern) or fnmatchcase(tool_name.lower(), pattern.lower())
+            for pattern in HOST_EXECUTION_PATTERNS
+        )
 
     @classmethod
     async def create(cls, **kwargs) -> "PolicySandboxManus":
@@ -44,17 +53,24 @@ class PolicySandboxManus(SandboxManus):
                 instance.system_prompt
                 + "\n\nCATARON SANDBOX RUNTIME: This task runs inside an isolated Daytona sandbox. "
                 "The writable project root is /workspace/projects. Always use /workspace/projects "
-                "for the current project. Never use /app/workspace or the host filesystem."
+                "for the current project. Never use /app/workspace or the host filesystem. "
+                "For Python, shell commands, package installation, tests, builds, and file operations, "
+                "use the provided sandbox tools (especially sandbox_shell and sandbox_files). "
+                "Never request python_execute, bash, computer_use, or docker host tools."
             )
         except Exception:
             # Sandbox creation itself remains authoritative; a clear runtime
             # error will be produced if the workspace cannot be initialized.
             raise
 
+        # A Daytona-backed agent must never expose host execution tools to the
+        # model. This is stronger than merely rejecting them at execution time:
+        # it prevents the model from selecting a tool that the platform boundary
+        # is guaranteed to reject, which previously caused Builder step 0 to fail.
         tools = [
             tool
             for tool in instance.available_tools.tools
-            if tool.name not in {"sandbox_browser", "ask_human"}
+            if tool.name != "ask_human" and not cls._is_host_execution_tool(tool.name)
         ]
         instance.available_tools = ToolCollection(*tools)
         instance.available_tools.add_tools(
