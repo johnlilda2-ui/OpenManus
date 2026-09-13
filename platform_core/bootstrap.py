@@ -1,6 +1,8 @@
+import secrets
+
 from app.config import config
 
-from platform_core.secrets import resolve_config_secret
+from platform_core.secrets import SecretNotFound, resolve_config_secret
 
 
 def resolve_runtime_secrets() -> None:
@@ -14,4 +16,11 @@ def resolve_runtime_secrets() -> None:
     if daytona is not None:
         daytona.daytona_api_key = resolve_config_secret(daytona.daytona_api_key) or daytona.daytona_api_key
         if getattr(daytona, "VNC_password", None):
-            daytona.VNC_password = resolve_config_secret(daytona.VNC_password) or daytona.VNC_password
+            try:
+                resolved_vnc = resolve_config_secret(daytona.VNC_password)
+            except SecretNotFound:
+                # VNC is an internal sandbox bootstrap credential. When a deployment
+                # does not provide the optional secret, create an ephemeral strong
+                # password rather than preventing the worker from starting.
+                resolved_vnc = secrets.token_hex(8)
+            daytona.VNC_password = resolved_vnc or secrets.token_hex(8)
