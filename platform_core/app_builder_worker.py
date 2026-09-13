@@ -32,6 +32,32 @@ from platform_core.worker import PolicyManus
 logger = logging.getLogger("openmanus-app-builder-worker")
 
 
+class _BuilderCancellationRequested(Exception):
+    pass
+
+
+async def _builder_cancel_requested(run_id: str) -> bool:
+    async with SessionLocal() as session:
+        run = await session.get(WorkflowRun, run_id)
+        return bool(run and run.cancel_requested)
+
+
+async def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str) -> str:
+    execution = asyncio.create_task(agent.run(prompt))
+    while not execution.done():
+        try:
+            return await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)
+        except asyncio.TimeoutError:
+            if await _builder_cancel_requested(run_id):
+                execution.cancel()
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                raise _BuilderCancellationRequested
+    return await execution
+
+
 async def _create_agent(policy: ToolPolicy, role: str, model_profile: str | None, approved_tools: set[str]):
     resolve_runtime_secrets()
     llm = create_llm(role, model_profile)
@@ -251,6 +277,7 @@ async def process_builder_run(run_id: str) -> None:
 
             completed = False
             blocked_by_approval = False
+            cancelled = False
             last_error = ""
             result = ""
             for attempt in range(1, max_attempts + 1):
@@ -262,6 +289,12 @@ async def process_builder_run(run_id: str) -> None:
                             WorkflowStepRun.step_index == step_index,
                         )
                     )
+                    if run.cancel_requested:
+                        run.status = "builder_cancelled"
+                        run.completed_at = datetime.now(timezone.utc)
+                        step.status = "cancelled"
+                        await session.commit()
+                        return
                     step.status = "running"
                     step.attempt = attempt
                     step.started_at = datetime.now(timezone.utc)
@@ -286,8 +319,29 @@ async def process_builder_run(run_id: str) -> None:
                 before_input = int(getattr(agent.llm, "total_input_tokens", 0))
                 before_output = int(getattr(agent.llm, "total_completion_tokens", 0))
                 try:
-                    result = await agent.run(enriched)
+                    result = await _run_builder_agent_with_cancellation(agent, enriched, run_id)
                     completed = True
+                except _BuilderCancellationRequested:
+                    cancelled = True
+                    async with SessionLocal() as session:
+                        run = await session.get(WorkflowRun, run_id)
+                        step = await session.scalar(
+                            select(WorkflowStepRun).where(
+                                WorkflowStepRun.workflow_run_id == run_id,
+                                WorkflowStepRun.step_index == step_index,
+                            )
+                        )
+                        if run is not None:
+                            run.status = "builder_cancelled"
+                            run.error = None
+                            run.completed_at = datetime.now(timezone.utc)
+                        if step is not None:
+                            step.status = "cancelled"
+                            step.error = None
+                            step.completed_at = datetime.now(timezone.utc)
+                        await add_workflow_event(session, run_id, "builder.cancelled", {"status": "builder_cancelled", "step_index": step_index, "interrupted": True})
+                        await session.commit()
+                    return
                 except ToolApprovalRequired as exc:
                     blocked_by_approval = True
                     async with SessionLocal() as session:
@@ -339,7 +393,25 @@ async def process_builder_run(run_id: str) -> None:
                 step_input_tokens = max(0, after_input - before_input)
                 step_output_tokens = max(0, after_output - before_output)
 
-                if blocked_by_approval:
+                if blocked_by_approval or cancelled:
+                    return
+                if await _builder_cancel_requested(run_id):
+                    async with SessionLocal() as session:
+                        run = await session.get(WorkflowRun, run_id)
+                        step = await session.scalar(
+                            select(WorkflowStepRun).where(
+                                WorkflowStepRun.workflow_run_id == run_id,
+                                WorkflowStepRun.step_index == step_index,
+                            )
+                        )
+                        if run is not None:
+                            run.status = "builder_cancelled"
+                            run.completed_at = datetime.now(timezone.utc)
+                        if step is not None:
+                            step.status = "cancelled"
+                            step.completed_at = datetime.now(timezone.utc)
+                        await add_workflow_event(session, run_id, "builder.cancelled", {"status": "builder_cancelled", "step_index": step_index, "interrupted": False})
+                        await session.commit()
                     return
                 if completed:
                     async with SessionLocal() as session:
@@ -372,6 +444,14 @@ async def process_builder_run(run_id: str) -> None:
                             WorkflowStepRun.step_index == step_index,
                         )
                     )
+                    if run.cancel_requested:
+                        run.status = "builder_cancelled"
+                        run.completed_at = datetime.now(timezone.utc)
+                        if step is not None:
+                            step.status = "cancelled"
+                            step.completed_at = datetime.now(timezone.utc)
+                        await session.commit()
+                        return
                     step.status = "failed"
                     step.error = last_error[:10000]
                     step.completed_at = datetime.now(timezone.utc)
@@ -388,8 +468,7 @@ async def process_builder_run(run_id: str) -> None:
                         {
                             "status": run.status,
                             "step_index": step_index,
-                            "attempts": max_attempts,
-                            "error": last_error[:2000],
+                            "error": run.error,
                         },
                     )
                     await session.commit()
@@ -397,65 +476,35 @@ async def process_builder_run(run_id: str) -> None:
 
             async with SessionLocal() as session:
                 run = await session.get(WorkflowRun, run_id)
-                step = await session.scalar(
-                    select(WorkflowStepRun).where(
-                        WorkflowStepRun.workflow_run_id == run_id,
-                        WorkflowStepRun.step_index == step_index,
-                    )
-                )
-                step.status = "completed"
-                step.result = result[:50000]
-                step.completed_at = datetime.now(timezone.utc)
                 run.output = result
                 run.current_step = step_index + 1
                 run.heartbeat_at = datetime.now(timezone.utc)
-                await add_workflow_event(
-                    session,
-                    run_id,
-                    "builder.step_completed",
-                    {"step_index": step_index, "next_step": run.current_step},
-                )
+                await add_workflow_event(session, run_id, "builder.step_completed", {"step_index": step_index, "next_step": run.current_step, "result": result[:10000]})
                 await session.commit()
 
         async with SessionLocal() as session:
             run = await session.get(WorkflowRun, run_id)
             project = await session.get(Project, run.project_id)
-            run.output = run.output or "Application build completed."
-            run.status = "builder_completed"
-            run.completed_at = datetime.now(timezone.utc)
-            archive = (
-                _sandbox_package(agent, project.id)
-                if settings.sandbox_enabled
-                else _package_local_workspace(project.id)
-            )
+            if run.cancel_requested:
+                run.status = "builder_cancelled"
+                run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+                return
             try:
-                download_url = await _record_artifact(session, run, project, archive)
-            finally:
-                archive.unlink(missing_ok=True)
-            await add_workflow_event(
-                session,
-                run_id,
-                "builder.artifact_created",
-                {
-                    "status": run.status,
-                    "download_url": download_url,
-                    "filename": "application.zip",
-                },
-            )
-            await add_workflow_event(
-                session,
-                run_id,
-                "builder.completed",
-                {"status": run.status, "artifact": download_url},
-            )
-            await add_audit_event(
-                session,
-                "builder.completed",
-                actor_user_id=run.owner_id,
-                project_id=project.id,
-                metadata={"run_id": run.id, "artifact": download_url},
-            )
-            await session.commit()
+                local_zip = _sandbox_package(agent, project.id) if settings.sandbox_enabled else _package_local_workspace(project.id)
+                artifact_url = await _record_artifact(session, run, project, local_zip)
+                run.output = f"Application generated successfully. Artifact: {artifact_url}"
+                run.status = "builder_completed"
+                run.completed_at = datetime.now(timezone.utc)
+                await add_workflow_event(session, run.id, "builder.artifact_created", {"artifact_url": artifact_url, "status": run.status})
+                await add_workflow_event(session, run.id, "builder.completed", {"status": run.status, "output": run.output})
+                await session.commit()
+            except Exception as exc:
+                run.status = "builder_failed"
+                run.error = str(exc)[:10000]
+                run.completed_at = datetime.now(timezone.utc)
+                await add_workflow_event(session, run.id, "builder.failed", {"status": run.status, "error": run.error})
+                await session.commit()
     except Exception as exc:
         logger.exception("Builder run %s failed", run_id)
         async with SessionLocal() as session:
@@ -464,81 +513,10 @@ async def process_builder_run(run_id: str) -> None:
                 run.status = "builder_failed"
                 run.error = str(exc)[:10000]
                 run.completed_at = datetime.now(timezone.utc)
-                await add_workflow_event(
-                    session,
-                    run_id,
-                    "builder.failed",
-                    {"status": run.status, "error": run.error[:2000]},
-                )
-                await add_audit_event(
-                    session,
-                    "builder.failed",
-                    actor_user_id=run.owner_id,
-                    project_id=run.project_id,
-                    metadata={"run_id": run.id},
-                )
                 await session.commit()
     finally:
-        if agent is not None:
-            try:
-                await agent.cleanup()
-            except Exception:
-                logger.exception("Builder agent cleanup failed for %s", run_id)
-
-
-async def recover_stale_builder_runs() -> None:
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.workflow_stale_seconds)
-    async with SessionLocal() as session:
-        rows = await session.scalars(
-            select(WorkflowRun).where(
-                WorkflowRun.status == "builder_running",
-                WorkflowRun.heartbeat_at.is_not(None),
-                WorkflowRun.heartbeat_at < cutoff,
-            )
-        )
-        recovered = []
-        for run in rows.all():
-            run.status = "builder_queued"
-            recovered.append(run.id)
-            await add_workflow_event(
-                session,
-                run.id,
-                "builder.recovered",
-                {"status": "builder_queued", "reason": "stale heartbeat"},
-            )
-        await session.commit()
-    for run_id in recovered:
         try:
-            await enqueue_app_builder(run_id)
+            if agent is not None:
+                await agent.cleanup()
         except Exception:
-            logger.exception("Failed to requeue builder run %s", run_id)
-
-
-async def builder_worker_loop() -> None:
-    if settings.auto_create_db:
-        await init_db()
-    redis: Redis = from_url(settings.redis_url, decode_responses=True)
-    logger.info("OpenManus App Builder listening on %s", settings.builder_queue_name)
-    last_recovery = datetime.min.replace(tzinfo=timezone.utc)
-    try:
-        while True:
-            now = datetime.now(timezone.utc)
-            if (now - last_recovery).total_seconds() >= 30:
-                await recover_stale_builder_runs()
-                last_recovery = now
-            item = await redis.brpop(settings.builder_queue_name, timeout=5)
-            if item:
-                run_id = item[1].split(":", 1)[1] if item[1].startswith("builder:") else item[1]
-                claimed = await claim_builder_run(run_id)
-                if claimed:
-                    await process_builder_run(claimed)
-                continue
-            run_id = await claim_builder_run()
-            if run_id:
-                await process_builder_run(run_id)
-    finally:
-        await redis.aclose()
-
-
-if __name__ == "__main__":
-    asyncio.run(builder_worker_loop())
+            logger.exception("Builder cleanup failed for run %s", run_id)
