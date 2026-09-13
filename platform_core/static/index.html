@@ -3,80 +3,133 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OpenManus Operational Console</title>
+<title>Cataron Operational Console</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:1120px;margin:0 auto;padding:24px;background:#f6f7f9;color:#171717}button,input,textarea,select{font:inherit;padding:9px;border:1px solid #ccc;border-radius:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:300px 1fr;gap:18px}.card{background:white;padding:18px;border-radius:12px;box-shadow:0 1px 4px #0001;margin-bottom:16px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{min-width:0}.list button{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}.muted{color:#666}.log{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:8px;min-height:120px;max-height:360px;overflow:auto}.approval,.builder-run{border:1px solid #ddd;padding:10px;border-radius:8px;margin:8px 0}.danger{color:#a00}.pill{display:inline-block;padding:2px 8px;border-radius:99px;background:#eee}.phase{padding:6px 8px;margin:4px 0;border-radius:7px;background:#f3f4f6}.phase.done{background:#e9f7ef}.phase.running{background:#fff6db}.phase.failed{background:#fdecec}.preview{padding:10px;border:1px solid #ddd;border-radius:8px;background:#f8fbff}.preview a{font-weight:600}.mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.mode label{border:1px solid #ddd;border-radius:10px;padding:12px;cursor:pointer}.mode input{margin-right:6px}.hidden{display:none}@media(max-width:760px){.grid{grid-template-columns:1fr}.mode{grid-template-columns:1fr}}
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#171717;background:#f5f6f8}
+*{box-sizing:border-box}
+body{margin:0;padding:16px}
+.wrap{max-width:1100px;margin:0 auto}
+.card{background:#fff;border:1px solid #e3e5e8;border-radius:14px;padding:16px;margin:0 0 14px;box-shadow:0 1px 2px #0000000a}
+h1{font-size:24px;margin:0 0 6px}.muted{color:#666}
+.grid{display:grid;grid-template-columns:280px 1fr;gap:14px}
+@media(max-width:760px){body{padding:10px}.grid{grid-template-columns:1fr}h1{font-size:21px}}
+input,textarea,button{font:inherit;border:1px solid #cfd3d8;border-radius:9px;padding:10px}
+input,textarea{width:100%;background:#fff}textarea{resize:vertical}
+button{cursor:pointer;background:#fff}button.primary{font-weight:700;background:#171717;color:#fff;border-color:#171717}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:110px}
+.list button{display:block;width:100%;text-align:left;margin:6px 0}
+.hidden{display:none!important}
+.builder-status{border:1px solid #dfe3e7;border-radius:12px;padding:14px;background:#fafbfc}
+.status-title{font-size:18px;font-weight:750}.status-detail{margin-top:4px;color:#666}
+.progress{height:9px;background:#e9ebee;border-radius:99px;overflow:hidden;margin:12px 0}.progress>div{height:100%;width:0;background:#171717;transition:width .3s}
+.phase{padding:8px 10px;border-radius:8px;background:#f1f3f5;margin:5px 0;color:#777}.phase.done{background:#eaf7ee;color:#171717}.phase.current{background:#fff4d6;color:#171717;font-weight:700}.phase.fail{background:#fdecec;color:#9b1c1c}
+.preview{border:1px solid #d8e4ef;border-radius:12px;padding:14px;background:#f7fbff;margin-top:12px}.preview a{font-weight:700}
+.builder-summary{padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;margin-top:10px}.badge{display:inline-block;padding:3px 8px;border-radius:99px;background:#eceff2;font-size:13px}
+.small{font-size:13px}.ok{color:#176a3a}.warn{color:#8a5a00}.err{color:#9b1c1c}
 </style>
 </head>
 <body>
-<h1>OpenManus Operational Console</h1>
-<p class="muted">Agent tasks, durable workflows, approvals, usage, Full App Builder, and specialized Website Builder.</p>
-<div id="auth" class="card">
-  <div class="row"><input id="email" placeholder="Email"><input id="password" type="password" placeholder="Password"></div>
-  <div class="row" style="margin-top:8px"><button onclick="auth('register')">Register</button><button onclick="auth('login')">Login</button></div>
-  <p id="authmsg" class="muted"></p>
-</div>
-<div id="app" class="hidden">
-<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><strong>Cataron</strong><button onclick="logout()">Log out</button></div>
-<div class="grid">
-<aside>
-  <div class="card"><h3>Projects</h3><div class="row"><input id="projectName" placeholder="Project name"><button onclick="createProject()">+</button></div><div id="projects" class="list"></div></div>
-  <div class="card"><h3>Conversation</h3><div class="row"><input id="conversationTitle" placeholder="Conversation title"><button onclick="createConversation()">+</button></div><div id="conversations" class="list"></div></div>
-  <div class="card"><h3>Usage</h3><div id="usage" class="muted">Select a project.</div></div>
-  <div class="card"><h3>Approvals</h3><div id="approvals" class="muted">Select a project.</div></div>
-</aside>
-<main>
-  <div class="card"><h3 id="activeTitle">Select a project</h3><textarea id="prompt" rows="5" style="width:100%" placeholder="Give Cataron a task..."></textarea><div class="row" style="margin-top:8px"><button onclick="runTask()">Run task</button><button onclick="refreshAll()">Refresh</button></div></div>
-
+<div class="wrap">
   <div class="card">
-    <h3>AI Builder</h3>
-    <p class="muted">Choose a specialized Website Builder or the general Full App Builder. Both use the same isolated preview, browser verification, repair, re-verification, and artifact pipeline.</p>
-    <div class="mode">
-      <label><input type="radio" name="builderMode" value="website" checked onchange="updateBuilderMode()">Website Builder<br><small class="muted">Business sites, landing pages, blogs, portfolios, marketing sites.</small></label>
-      <label><input type="radio" name="builderMode" value="app" onchange="updateBuilderMode()">Full App Builder<br><small class="muted">SaaS apps, dashboards, APIs, databases, full-stack systems.</small></label>
-    </div>
-    <input id="builderName" value="AI Website Builder" placeholder="Project name" style="width:100%;box-sizing:border-box">
-    <textarea id="builderRequirements" rows="8" style="width:100%;box-sizing:border-box;margin-top:8px" placeholder="Example: Build a modern logistics company website with Home, About, Services, Fleet, Contact, quote request form, SEO metadata, responsive mobile navigation, polished animations, and accessible UI."></textarea>
-    <div class="row" style="margin-top:8px"><button onclick="startBuilder()">Build website</button><button onclick="refreshBuilderRuns()">Refresh builds</button></div>
-    <div id="builderPreview" class="preview" style="margin-top:12px">No live preview.</div>
-    <div id="builderRuns" style="margin-top:12px"></div>
+    <h1>Cataron Operational Console</h1>
+    <div class="muted">Build websites and full applications with automated planning, testing, repair and preview.</div>
   </div>
 
-  <div class="card"><h3>Tasks</h3><div id="tasks"></div></div>
-  <div class="card"><h3>Live events</h3><div id="log" class="log">No task selected.</div></div>
-</main>
-</div></div>
+  <div id="auth" class="card">
+    <h3>Sign in</h3>
+    <div class="row"><input id="email" placeholder="Email"><input id="password" type="password" placeholder="Password"></div>
+    <div class="row" style="margin-top:8px"><button onclick="auth('register')">Register</button><button class="primary" onclick="auth('login')">Login</button></div>
+    <div id="authmsg" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card row" style="align-items:center"><strong style="font-size:18px">Cataron</strong><button onclick="logout()">Log out</button></div>
+
+    <div class="grid">
+      <aside>
+        <div class="card">
+          <h3>Projects</h3>
+          <div class="row"><input id="projectName" placeholder="New project"><button onclick="createProject()">Create</button></div>
+          <div id="projects" class="list" style="margin-top:8px"></div>
+        </div>
+        <div class="card">
+          <h3>Conversation</h3>
+          <div class="row"><input id="conversationTitle" placeholder="New conversation"><button onclick="createConversation()">Create</button></div>
+          <div id="conversations" class="list" style="margin-top:8px"></div>
+        </div>
+        <div class="card"><h3>Usage</h3><div id="usage" class="muted">Select a project.</div></div>
+        <div class="card"><h3>Approvals</h3><div id="approvals" class="muted">Select a project.</div></div>
+      </aside>
+
+      <main>
+        <div class="card">
+          <h3 id="activeTitle">Select a project</h3>
+          <textarea id="prompt" rows="5" placeholder="Give Cataron a task..."></textarea>
+          <div class="row" style="margin-top:8px"><button class="primary" onclick="runTask()">Run task</button><button onclick="refreshAll()">Refresh</button></div>
+          <div id="taskStatus" class="muted" style="margin-top:8px"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="margin-top:0">AI Builder</h2>
+          <div class="muted">Choose Website Builder for websites or Full App Builder for complete applications.</div>
+          <div class="row" style="margin-top:10px">
+            <label style="border:1px solid #ddd;border-radius:10px;padding:12px"><input type="radio" name="builderMode" value="website" checked onchange="updateBuilderMode()"> Website Builder<div class="small muted">Marketing sites, blogs, landing pages and business websites.</div></label>
+            <label style="border:1px solid #ddd;border-radius:10px;padding:12px"><input type="radio" name="builderMode" value="app" onchange="updateBuilderMode()"> Full App Builder<div class="small muted">SaaS apps, dashboards, APIs, databases and full-stack systems.</div></label>
+          </div>
+          <input id="builderName" value="AI Website Builder" style="margin-top:10px" placeholder="Build name">
+          <textarea id="builderRequirements" rows="8" style="margin-top:8px" placeholder="Describe what you want Cataron to build."></textarea>
+          <div class="row" style="margin-top:8px"><button class="primary" onclick="startBuilder()" id="buildButton">Build website</button><button onclick="refreshBuilderRuns()">Check build status</button></div>
+
+          <div id="builderStatus" class="builder-status hidden" style="margin-top:12px">
+            <div id="statusTitle" class="status-title"></div>
+            <div id="statusDetail" class="status-detail"></div>
+            <div class="progress"><div id="statusProgress"></div></div>
+            <div id="phaseList"></div>
+            <div id="statusNotice" class="small" style="margin-top:8px"></div>
+          </div>
+
+          <div id="builderPreview" class="preview">No preview yet. Cataron will show it here when the build reaches the preview stage.</div>
+          <div id="builderAction" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card"><h3>Recent builds</h3><div id="builderRuns">No builds yet.</div></div>
+        <div class="card"><h3>Tasks</h3><div id="tasks">No tasks yet.</div></div>
+      </main>
+    </div>
+  </div>
+</div>
 <script>
-const state={token:localStorage.getItem('om_token')||'',project:null,conversation:null,builderRun:null};
+const state={token:localStorage.getItem('om_token')||'',project:null,conversation:null,builderRun:null,poll:null};
 const $=id=>document.getElementById(id);
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 async function api(path,opts={}){opts.headers={...(opts.headers||{}),...(state.token?{Authorization:'Bearer '+state.token}:{})};if(opts.body&&typeof opts.body!=='string'){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(opts.body)}const r=await fetch(path,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
-async function auth(kind){try{const data=await api('/v1/auth/'+kind,{method:'POST',body:{email:$('email').value,password:$('password').value}});state.token=data.access_token;localStorage.setItem('om_token',state.token);$('auth').classList.add('hidden');$('app').classList.remove('hidden');await refreshProjects()}catch(e){$('authmsg').textContent=e.message}}
-function logout(){state.token='';state.project=null;state.conversation=null;state.builderRun=null;localStorage.removeItem('om_token');$('app').classList.add('hidden');$('auth').classList.remove('hidden');$('authmsg').textContent='';$('password').value='';}
-async function refreshProjects(){const p=await api('/v1/projects');$('projects').innerHTML=p.map(x=>`<button onclick="selectProject('${x.id}','${esc(x.name)}')">${esc(x.name)}</button>`).join('');if(state.project){const current=p.find(x=>x.id===state.project);if(current)await selectProject(current.id,current.name)}}
-async function createProject(){const name=$('projectName').value.trim();if(!name)return;const p=await api('/v1/projects',{method:'POST',body:{name}});$('projectName').value='';await refreshProjects();selectProject(p.id,p.name)}
+async function auth(kind){try{const d=await api('/v1/auth/'+kind,{method:'POST',body:{email:$('email').value.trim(),password:$('password').value}});state.token=d.access_token;localStorage.setItem('om_token',state.token);$('auth').classList.add('hidden');$('app').classList.remove('hidden');await refreshProjects()}catch(e){$('authmsg').textContent=e.message}}
+function logout(){state.token='';localStorage.removeItem('om_token');location.reload()}
+async function refreshProjects(){const p=await api('/v1/projects');$('projects').innerHTML=p.map(x=>`<button onclick="selectProject('${x.id}','${esc(x.name)}')">${esc(x.name)}</button>`).join('');if(state.project){const x=p.find(v=>v.id===state.project);if(x)await selectProject(x.id,x.name)}}
+async function createProject(){const name=$('projectName').value.trim();if(!name)return;try{const p=await api('/v1/projects',{method:'POST',body:{name}});$('projectName').value='';state.project=p.id;await refreshProjects();await selectProject(p.id,p.name)}catch(e){$('taskStatus').textContent=e.message}}
 async function selectProject(id,name){state.project=id;state.conversation=null;$('activeTitle').textContent=name;await Promise.all([refreshConversations(),refreshTasks(),refreshUsage(),refreshApprovals(),refreshBuilderRuns()])}
 async function refreshConversations(){if(!state.project)return;const c=await api('/v1/projects/'+state.project+'/conversations');$('conversations').innerHTML=c.map(x=>`<button onclick="selectConversation('${x.id}','${esc(x.title)}')">${esc(x.title)}</button>`).join('')}
 async function createConversation(){if(!state.project)return;const title=$('conversationTitle').value.trim()||'New conversation';const c=await api('/v1/projects/'+state.project+'/conversations',{method:'POST',body:{title}});$('conversationTitle').value='';state.conversation=c.id;await refreshConversations()}
 async function selectConversation(id,title){state.conversation=id;$('activeTitle').textContent=title;await refreshTasks()}
-async function refreshTasks(){if(!state.project)return;const t=await api('/v1/projects/'+state.project+'/tasks');$('tasks').innerHTML=t.map(x=>`<div style="padding:8px 0;border-bottom:1px solid #eee"><span class="pill">${esc(x.status)}</span> — ${esc(x.prompt.slice(0,140))} <button onclick="watchTask('${x.id}')">Watch</button></div>`).join('')}
-async function refreshUsage(){try{const [u,q]=await Promise.all([api('/v1/projects/'+state.project+'/usage'),api('/v1/projects/'+state.project+'/quota')]);$('usage').innerHTML=`<b>${u.tokens.toLocaleString()}</b> / ${q.monthly_token_limit.toLocaleString()} tokens<br><b>${u.tasks}</b> / ${q.monthly_task_limit.toLocaleString()} tasks<br><b>${u.concurrent}</b> / ${q.max_concurrent_tasks} active`;}catch(e){$('usage').textContent=e.message}}
-async function refreshApprovals(){try{const a=await api('/v1/projects/'+state.project+'/approvals');const pending=a.filter(x=>x.status==='pending');$('approvals').innerHTML=pending.length?pending.map(x=>`<div class="approval"><b>${esc(x.tool_name)}</b><br>${esc(x.reason)}<div class="row" style="margin-top:6px"><button onclick="decideApproval('${x.id}','approve')">Approve</button><button onclick="decideApproval('${x.id}','deny')">Deny</button></div></div>`).join(''):'No pending approvals.';}catch(e){$('approvals').textContent=e.message}}
-async function decideApproval(id,action){try{await api('/v1/approvals/'+id+'/'+action,{method:'POST'});await refreshApprovals();await refreshTasks();await refreshBuilderRuns()}catch(e){$('log').textContent=e.message}}
-async function runTask(){if(!state.conversation){await createConversation()}if(!state.conversation)return;const prompt=$('prompt').value.trim();if(!prompt)return;try{const t=await api('/v1/conversations/'+state.conversation+'/tasks',{method:'POST',body:{prompt}});$('prompt').value='';await refreshTasks();await refreshUsage();watchTask(t.id)}catch(e){$('log').textContent=e.message}}
-async function watchTask(id){$('log').textContent='Connecting to task '+id+'...';try{const r=await fetch('/v1/tasks/'+id+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data)$('log').textContent+='\n'+data}}}catch(e){$('log').textContent+='\n'+e.message}finally{await refreshAll()}}
+async function refreshTasks(){if(!state.project)return;const t=await api('/v1/projects/'+state.project+'/tasks');$('tasks').innerHTML=t.length?t.map(x=>`<div class="builder-summary"><span class="badge">${esc(x.status)}</span> ${esc(x.prompt.slice(0,180))}</div>`).join(''):'No tasks yet.'}
+async function refreshUsage(){try{const [u,q]=await Promise.all([api('/v1/projects/'+state.project+'/usage'),api('/v1/projects/'+state.project+'/quota')]);$('usage').innerHTML=`<b>${Number(u.tokens||0).toLocaleString()}</b> / ${Number(q.monthly_token_limit||0).toLocaleString()} tokens<br><b>${Number(u.tasks||0)}</b> / ${Number(q.monthly_task_limit||0).toLocaleString()} tasks<br><b>${Number(u.concurrent||0)}</b> / ${Number(q.max_concurrent_tasks||0)} active`;}catch(e){$('usage').textContent='Usage unavailable.'}}
+async function refreshApprovals(){try{const a=await api('/v1/projects/'+state.project+'/approvals');const pending=a.filter(x=>x.status==='pending');$('approvals').innerHTML=pending.length?pending.map(x=>`<div class="builder-summary"><b>${esc(x.tool_name)}</b><br>${esc(x.reason)}<div class="row" style="margin-top:6px"><button onclick="decideApproval('${x.id}','approve')">Approve</button><button onclick="decideApproval('${x.id}','deny')">Deny</button></div></div>`).join(''):'No pending approvals.'}catch(e){$('approvals').textContent='Approvals unavailable.'}}
+async function decideApproval(id,action){try{await api('/v1/approvals/'+id+'/'+action,{method:'POST'});await refreshApprovals();await refreshBuilderRuns()}catch(e){$('taskStatus').textContent=e.message}}
+async function runTask(){if(!state.project){$('taskStatus').textContent='Select a project first.';return}if(!state.conversation)await createConversation();const p=$('prompt').value.trim();if(!p||!state.conversation)return;try{const t=await api('/v1/conversations/'+state.conversation+'/tasks',{method:'POST',body:{prompt:p}});$('prompt').value='';$('taskStatus').textContent='Task submitted. Cataron is processing it.';await refreshTasks();await refreshUsage()}catch(e){$('taskStatus').textContent=e.message}}
 function currentBuilderMode(){return document.querySelector('input[name="builderMode"]:checked')?.value||'website'}
-function updateBuilderMode(){const website=currentBuilderMode()==='website';$('builderName').value=website?'AI Website Builder':'AI App Builder';$('builderRequirements').placeholder=website?'Example: Build a modern logistics company website with Home, About, Services, Fleet, Contact, quote request form, SEO metadata, responsive mobile navigation, polished animations, and accessible UI.':'Example: Build a responsive SaaS dashboard with authentication, a PostgreSQL API, React/Tailwind frontend, charts, search, and a polished mobile experience.';$('builderName').dataset.mode=website?'website':'app';document.querySelector('button[onclick="startBuilder()"]').textContent=website?'Build website':'Build application'}
-async function startBuilder(){if(!state.project)return;const requirements=$('builderRequirements').value.trim();if(requirements.length<20){$('log').textContent='Please describe the project in at least 20 characters.';return}const mode=currentBuilderMode();const endpoint=mode==='website'?'/v1/projects/'+state.project+'/website-builder':'/v1/projects/'+state.project+'/app-builder';try{const run=await api(endpoint,{method:'POST',body:{requirements,name:$('builderName').value.trim()||(mode==='website'?'AI Website Builder':'AI App Builder'),mode}});state.builderRun=run.run_id;await refreshBuilderRuns();watchBuilder(run.run_id)}catch(e){$('log').textContent=e.message}}
-async function refreshBuilderRuns(){if(!state.project)return;try{const runs=await api('/v1/projects/'+state.project+'/app-builder/runs');$('builderRuns').innerHTML=runs.length?runs.map(r=>`<div class="builder-run"><div><span class="pill">${esc(r.status)}</span> — ${esc(r.id.slice(0,12))}</div><div class="muted">Step ${r.current_step}</div>${r.output?`<div style="margin-top:6px">${renderText(r.output.slice(-900))}</div>`:''}<div class="row" style="margin-top:6px"><button onclick="watchBuilder('${r.id}')">Watch</button>${r.status==='builder_queued'||r.status==='builder_running'||r.status==='builder_awaiting_approval'?`<button onclick="cancelBuilder('${r.id}')">Cancel</button>`:''}${r.status==='builder_completed'?`<button onclick="openBuilderArtifact('${r.id}')">Download application.zip</button>`:''}</div></div>`).join(''):'No builder runs yet.';if(runs.length){const active=runs.find(r=>r.id===state.builderRun)||runs[0];await refreshBuilderPreview(active.id)}}catch(e){$('builderRuns').textContent=e.message}}
-async function refreshBuilderPreview(runId){try{const p=await api('/v1/app-builder/runs/'+runId+'/preview');if(p.url){$('builderPreview').innerHTML=`Live preview: <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open preview ↗</a><div class="muted">Detected during: ${esc(p.step||'builder phase')}</div>`}else{$('builderPreview').textContent='No live preview is available yet. The sandbox preview is created during the Run and Preview phase.'}}catch(e){$('builderPreview').textContent='Preview status unavailable.'}}
-async function watchBuilder(runId){state.builderRun=runId;$('log').textContent='Connecting to Builder '+runId+'...';await refreshBuilderPreview(runId);try{const r=await fetch('/v1/app-builder/runs/'+runId+'/events',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error(await r.text());const reader=r.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){const data=chunk.split('\n').filter(x=>x.startsWith('data: ')).map(x=>x.slice(6)).join('\n');if(data){$('log').textContent+='\n'+data;try{const parsed=JSON.parse(data);renderBuilderProgress(parsed);if(parsed.kind&&parsed.kind.startsWith('builder.'))await refreshBuilderPreview(runId)}catch(_){}}}}}catch(e){$('log').textContent+='\n'+e.message}finally{await refreshBuilderRuns();await refreshUsage()}}
-function renderBuilderProgress(event){if(event.kind==='builder.queued')$('log').textContent+=`\nBUILDER MODE: ${event.payload.mode||'app'}`;if(event.kind==='builder.step_started')$('log').textContent+=`\nPHASE ${event.payload.step_index+1}: ${event.payload.name} [${event.payload.role}/${event.payload.model_profile}]`;if(event.kind==='builder.step_completed')$('log').textContent+=`\nCOMPLETED PHASE ${event.payload.step_index+1}`;if(event.kind==='builder.artifact_created')$('log').textContent+=`\nARTIFACT READY: ${event.payload.download_url}`;if(event.kind==='builder.failed')$('log').textContent+=`\nBUILDER FAILED: ${event.payload.error||''}`;}
-async function cancelBuilder(id){try{await api('/v1/app-builder/runs/'+id+'/cancel',{method:'POST'});await refreshBuilderRuns()}catch(e){$('log').textContent=e.message}}
-async function openBuilderArtifact(id){try{const artifact=await api('/v1/app-builder/runs/'+id+'/artifact');window.open(artifact.download_url,'_blank','noopener');$('log').textContent='Opening '+artifact.filename+'...'}catch(e){$('log').textContent=e.message}}
+function updateBuilderMode(){const website=currentBuilderMode()==='website';$('builderName').value=website?'AI Website Builder':'AI App Builder';$('builderRequirements').placeholder=website?'Describe the website you want Cataron to build.':'Describe the full application you want Cataron to build.';$('buildButton').textContent=website?'Build website':'Build application'}
+const websitePhases=['Research and plan','Design system','Build pages and content','Create and source visuals','Implement frontend','SEO and accessibility','Configure preview','Run and preview','Automated testing','Browser verification','Repair problems','Re-verify','Final review'];
+const appPhases=['Plan application','Design system','Build application','Create assets','Implement frontend','Harden application','Configure preview','Run and preview','Automated testing','Browser verification','Repair problems','Re-verify','Final review'];
+function showStatus(run){$('builderStatus').classList.remove('hidden');const phases=currentBuilderMode()==='app'?appPhases:websitePhases;const step=Math.max(0,Number(run.current_step||0));let title='Cataron is building';let detail='Cataron is working automatically.';let pct=Math.min(100,Math.round(step/phases.length*100));let notice='';if(run.status==='builder_queued'){title='Waiting for Cataron to start';detail='Your build is safely queued. You do not need to refresh this page.';pct=0}else if(run.status==='builder_running'){title='Cataron is building';detail=`Working on phase ${Math.min(step+1,phases.length)} of ${phases.length}.`}else if(run.status==='builder_awaiting_approval'){title='Approval needed';detail='Cataron is waiting for an approval before continuing.';notice='Open the Approvals panel to continue.'}else if(run.status==='builder_completed'){title='Build complete';detail='Cataron finished the build.';pct=100;notice='Your build is ready.'}else if(run.status==='builder_cancelled'){title='Build cancelled';detail='This build was stopped.'}else if(run.status==='builder_failed'){title='Build failed';detail='Cataron stopped because an error occurred.';notice=run.error||'Check the build details.'}else if(run.status){title='Build status';detail='Current status: '+run.status}$('statusTitle').textContent=title;$('statusDetail').textContent=detail;$('statusProgress').style.width=pct+'%';$('statusNotice').textContent=notice;$('phaseList').innerHTML=phases.map((p,i)=>`<div class="phase ${i<step?'done':''} ${run.status==='builder_running'&&i===step?'current':''} ${run.status==='builder_failed'&&i===step?'fail':''}">${i<step?'✓':run.status==='builder_running'&&i===step?'▶':'○'} ${p}</div>`).join('')}
+async function refreshBuilderRuns(){if(!state.project)return;try{const runs=await api('/v1/projects/'+state.project+'/app-builder/runs');if(!runs.length){$('builderRuns').textContent='No builds yet.';return}const active=runs.find(r=>r.id===state.builderRun)||runs[0];state.builderRun=active.id;showStatus(active);$('builderRuns').innerHTML=runs.slice(0,5).map(r=>`<div class="builder-summary"><span class="badge">${esc(r.status)}</span> <b>Build</b><div class="small muted">Phase ${Number(r.current_step||0)+1}</div><div class="row" style="margin-top:6px"><button onclick="watchBuilder('${r.id}')">View status</button>${['builder_queued','builder_running','builder_awaiting_approval'].includes(r.status)?`<button onclick="cancelBuilder('${r.id}')">Cancel</button>`:''}${r.status==='builder_completed'?`<button onclick="openArtifact('${r.id}')">Open application</button>`:''}</div></div>`).join('');await refreshBuilderPreview(active.id)}catch(e){$('builderRuns').textContent='Build status unavailable.'}}
+async function refreshBuilderPreview(id){try{const p=await api('/v1/app-builder/runs/'+id+'/preview');if(p.url){$('builderPreview').innerHTML=`<b>Live preview is ready.</b><br><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open live preview ↗</a><div class="small muted" style="margin-top:6px">Preview created during the Run and Preview phase.</div>`}else{$('builderPreview').textContent='No live preview yet. Cataron will keep checking automatically.'}}catch(e){$('builderPreview').textContent='Preview is not available yet.'}}
+async function startBuilder(){if(!state.project){alert('Select a project first.');return}const req=$('builderRequirements').value.trim();if(req.length<20){alert('Please describe the project in at least 20 characters.');return}const mode=currentBuilderMode();const endpoint=mode==='website'?'/v1/projects/'+state.project+'/website-builder':'/v1/projects/'+state.project+'/app-builder';try{const run=await api(endpoint,{method:'POST',body:{requirements:req,name:$('builderName').value.trim()||(mode==='website'?'AI Website Builder':'AI App Builder'),mode}});state.builderRun=run.run_id;showStatus({id:run.run_id,status:'builder_queued',current_step:0});$('builderPreview').textContent='Build started. Cataron will update this page automatically.';if(state.poll)clearInterval(state.poll);state.poll=setInterval(()=>refreshBuilderRuns(),3000);await refreshBuilderRuns()}catch(e){alert('The build could not be started. '+e.message)}}
+async function watchBuilder(id){state.builderRun=id;await refreshBuilderRuns();if(state.poll)clearInterval(state.poll);state.poll=setInterval(()=>refreshBuilderRuns(),3000)}
+async function cancelBuilder(id){try{await api('/v1/app-builder/runs/'+id+'/cancel',{method:'POST'});await refreshBuilderRuns()}catch(e){alert(e.message)}}
+async function openArtifact(id){try{const a=await api('/v1/app-builder/runs/'+id+'/artifact');window.open(a.download_url,'_blank','noopener')}catch(e){alert(e.message)}}
 async function refreshAll(){if(!state.project)return;await Promise.all([refreshTasks(),refreshUsage(),refreshApprovals(),refreshBuilderRuns()])}
-function renderText(s){return esc(s).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')}
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 updateBuilderMode();
 if(state.token){$('auth').classList.add('hidden');$('app').classList.remove('hidden');refreshProjects().catch(()=>{localStorage.removeItem('om_token');location.reload()})}
 </script>
-</body></html>
+</body>
+</html>
