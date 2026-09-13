@@ -8,6 +8,18 @@ import boto3
 from platform_core.settings import settings
 
 
+def _normalize_region(region: str | None) -> str | None:
+    """Accept AWS region IDs and provider dashboard labels such as 'Western Europe WEUR'."""
+    if not region:
+        return None
+    value = region.strip()
+    if not value:
+        return None
+    if " " in value:
+        value = value.split()[-1]
+    return value.lower()
+
+
 class ArtifactStorage:
     def __init__(self) -> None:
         self.root = Path(settings.artifact_root).resolve()
@@ -18,7 +30,7 @@ class ArtifactStorage:
             self.s3 = boto3.client(
                 "s3",
                 endpoint_url=settings.s3_endpoint_url or None,
-                region_name=settings.s3_region or None,
+                region_name=_normalize_region(settings.s3_region),
             )
 
     def _local_path(self, storage_key: str) -> Path:
