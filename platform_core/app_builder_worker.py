@@ -80,10 +80,23 @@ async def _create_agent(policy: ToolPolicy, role: str, model_profile: str | None
     )
 
 
+def _builder_agent_step_budget(role: str) -> int:
+    budgets = {
+        "planner": 8,
+        "designer": 10,
+        "builder": 12,
+        "tester": 10,
+        "reviewer": 8,
+        "fixer": 10,
+    }
+    return int(os.getenv("OPENMANUS_BUILDER_AGENT_MAX_STEPS", budgets.get(role, 10)))
+
+
 def _reset_agent(agent, role: str, model_profile: str | None) -> None:
     agent.llm = create_llm(role, model_profile)
     agent.state = AgentState.IDLE
     agent.current_step = 0
+    agent.max_steps = _builder_agent_step_budget(role)
     agent.memory = Memory()
 
 
