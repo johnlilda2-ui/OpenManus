@@ -71,19 +71,11 @@ def _message_text(messages: Iterable[Any]) -> str:
 def _should_escalate(messages: Iterable[Any]) -> bool:
     text = _message_text(messages)
     lowered = text.lower()
-    threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "20000"))
+    threshold = int(os.getenv("OPENMANUS_ESCALATION_MAX_INPUT_CHARS", "100000"))
     critical_terms = (
-        "production",
-        "security",
-        "authentication",
-        "authorization",
-        "database migration",
         "data loss",
-        "payment",
-        "credentials",
         "critical incident",
         "incident response",
-        "architecture",
         "deploy to production",
     )
     return len(text) >= threshold or any(term in lowered for term in critical_terms)

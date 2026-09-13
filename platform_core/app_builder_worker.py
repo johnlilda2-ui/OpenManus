@@ -25,6 +25,7 @@ from platform_core.models import ApprovalRequest, Artifact, Project, ProjectPoli
 from platform_core.policy import PolicyToolBroker, ToolApprovalRequired, ToolPolicy
 from platform_core.queue import enqueue_app_builder
 from platform_core.settings import settings
+from platform_core.usage import record_usage
 from platform_core.workflows import get_or_create_step_run, render_step_prompt
 from platform_core.worker import PolicyManus
 
