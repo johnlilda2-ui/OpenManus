@@ -361,7 +361,7 @@ async def worker_loop() -> None:
     if settings.auto_create_db:
         await init_db()
     redis: Redis = from_url(settings.redis_url, decode_responses=True)
-    logger.info("OpenManus worker listening on %s", settings.queue_name)
+    logger.info("OpenManus worker listening on %s and %s", settings.queue_name, settings.builder_queue_name)
     last_recovery = datetime.min.replace(tzinfo=timezone.utc)
     try:
         while True:
@@ -370,8 +370,7 @@ async def worker_loop() -> None:
                 await recover_stale_workflows()
                 last_recovery = now
             item = await redis.brpop(
-                settings.queue_name,
-                settings.builder_queue_name,
+                [settings.queue_name, settings.builder_queue_name],
                 timeout=5,
             )
             selected_item = item[1] if item else None
