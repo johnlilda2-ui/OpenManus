@@ -77,7 +77,6 @@ class PolicySandboxManus(SandboxManus):
             SandboxVisualBrowserTool.create_with_sandbox(instance.sandbox),
             SandboxPreviewTool.create_with_sandbox(instance.sandbox),
             FirecrawlWebSearch(),
-            SandboxPreviewTool.create_with_sandbox(instance.sandbox),
         )
         return instance
 
