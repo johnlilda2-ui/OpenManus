@@ -48,6 +48,7 @@ class FirecrawlWebSearch(BaseTool):
                 "type": "integer",
                 "description": "Number of results to return. Keep this small for research.",
                 "default": 2,
+                "maximum": 2,
             },
             "lang": {
                 "type": "string",
@@ -78,10 +79,10 @@ class FirecrawlWebSearch(BaseTool):
         if not api_key:
             return FirecrawlWebSearchResult(
                 query=query,
-                error="Firecrawl is not configured: FIRECRAWL_API_KEY is missing.",
+                error="Firecrawl is not configured: add the Render secret OPENMANUS_SECRET_FIRECRAWL_API_KEY.",
             )
 
-        limit = max(1, min(int(num_results), 3))
+        limit = max(1, min(int(num_results), 2))
         payload = {
             "query": query,
             "limit": limit,
