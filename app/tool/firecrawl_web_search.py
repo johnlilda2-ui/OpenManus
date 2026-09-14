@@ -73,6 +73,7 @@ class FirecrawlWebSearch(BaseTool):
         api_key = (
             os.getenv("FIRECRAWL_API_KEY", "").strip()
             or os.getenv("OPENMANUS_FIRECRAWL_API_KEY", "").strip()
+            or os.getenv("OPENMANUS_SECRET_FIRECRAWL_API_KEY", "").strip()
         )
         if not api_key:
             return FirecrawlWebSearchResult(
