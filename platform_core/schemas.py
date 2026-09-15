@@ -195,6 +195,8 @@ class AppBuilderCreate(BaseModel):
     name: str = Field(default="AI App Builder", min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
     mode: Literal["app", "website"] = "app"
+    research_synthesis: str | None = Field(default=None, max_length=12000)
+    research_references: list[dict] = Field(default_factory=list, max_length=2)
 
 
 class AppBuilderResponse(BaseModel):
@@ -298,26 +300,3 @@ class ArtifactResponse(BaseModel):
     size_bytes: int
     created_at: datetime
     download_url: str
-
-
-class ProjectQuotaResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    project_id: str
-    monthly_token_limit: int
-    monthly_task_limit: int
-    max_concurrent_tasks: int
-    hard_block: bool
-
-
-class ProjectQuotaUpdate(BaseModel):
-    monthly_token_limit: int = Field(ge=1, le=1000000000)
-    monthly_task_limit: int = Field(ge=1, le=10000000)
-    max_concurrent_tasks: int = Field(ge=1, le=1000)
-    hard_block: bool = True
-
-
-class UsageSummaryResponse(BaseModel):
-    project_id: str
-    tokens: int
-    tasks: int
-    concurrent: int
