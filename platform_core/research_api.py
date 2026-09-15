@@ -90,12 +90,15 @@ def _research_planner_llm() -> LLM:
         model=model,
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
-        max_tokens=1200,
+        max_tokens=1600,
         temperature=0.2,
         api_type="openai",
         api_version="",
     )
-    return LLM(config_name="__cataron_research_planner__", llm_config={"__cataron_research_planner__": settings, "default": settings})
+    return LLM(
+        config_name="__cataron_research_planner__",
+        llm_config={"__cataron_research_planner__": settings, "default": settings},
+    )
 
 
 @router.post("/v1/projects/{project_id}/research/synthesize", response_model=ResearchSynthesisResult)
@@ -141,19 +144,44 @@ async def synthesize_research(
 
     try:
         llm = _research_planner_llm()
-        synthesis = await llm.ask(
-            messages,
-            system_msgs=[
+        formatted_messages = llm.format_messages(
+            [
                 {
                     "role": "system",
                     "content": "You are Cataron's planning/research analyst. Be concise, evidence-based, and practical.",
-                }
+                },
+                *messages,
             ],
-            stream=False,
-            temperature=0.2,
+            supports_images=False,
         )
+        input_tokens = llm.count_message_tokens(formatted_messages)
+        if not llm.check_token_limit(input_tokens):
+            raise RuntimeError(llm.get_limit_error_message(input_tokens))
+
+        # DeepSeek V4 Pro supports reasoning, but this small synthesis task does not
+        # need hidden reasoning. Disabling it prevents a short max_tokens budget from
+        # being consumed entirely by reasoning tokens and leaving message.content empty.
+        response = await llm.client.chat.completions.create(
+            model=llm.model,
+            messages=formatted_messages,
+            max_tokens=llm.max_tokens,
+            temperature=0.2,
+            stream=False,
+            extra_body={"reasoning": {"enabled": False}},
+        )
+        message = response.choices[0].message if response.choices else None
+        synthesis = (getattr(message, "content", None) or "").strip() if message else ""
+        if not synthesis:
+            raise RuntimeError("Planner returned no synthesis text")
+
+        usage = response.usage
+        if usage:
+            llm.update_token_count(usage.prompt_tokens, usage.completion_tokens)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Planner synthesis failed: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Planner synthesis failed: {type(exc).__name__}: {exc}",
+        ) from exc
 
     return ResearchSynthesisResult(
         query=payload.query.strip(),
