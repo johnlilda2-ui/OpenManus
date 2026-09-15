@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Optional
 
 import requests
@@ -48,7 +49,7 @@ class FirecrawlWebSearch(BaseTool):
                 "type": "integer",
                 "description": "Number of results to return. Keep this small for research.",
                 "default": 2,
-                "maximum": 2,
+                "maximum": 4,
             },
             "lang": {
                 "type": "string",
@@ -82,7 +83,7 @@ class FirecrawlWebSearch(BaseTool):
                 error="Firecrawl is not configured: add the Render secret OPENMANUS_SECRET_FIRECRAWL_API_KEY.",
             )
 
-        limit = max(1, min(int(num_results), 2))
+        limit = max(1, min(int(num_results), 4))
         payload = {
             "query": query,
             "limit": limit,
