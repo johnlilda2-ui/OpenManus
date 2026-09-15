@@ -59,6 +59,32 @@ class ProjectPolicyUpdate(BaseModel):
     approval_required_patterns: list[str] = Field(default_factory=list, max_length=100)
 
 
+class ProjectQuotaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    monthly_token_limit: int
+    monthly_task_limit: int
+    max_concurrent_tasks: int
+    hard_block: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectQuotaUpdate(BaseModel):
+    monthly_token_limit: int = Field(ge=1)
+    monthly_task_limit: int = Field(ge=1)
+    max_concurrent_tasks: int = Field(ge=1)
+    hard_block: bool = True
+
+
+class UsageSummaryResponse(BaseModel):
+    project_id: str
+    tokens: int
+    tasks: int
+    concurrent: int
+
+
 class ApprovalResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
