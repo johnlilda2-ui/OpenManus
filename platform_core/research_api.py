@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import os
+import re
+from urllib.parse import urlparse
 
 from app.config import LLMSettings
 from app.llm import LLM
@@ -50,6 +52,59 @@ async def _require_project_member(
         raise HTTPException(status_code=404 if project is None else 403, detail=str(exc)) from exc
 
 
+def _is_usable_research_result(item: dict) -> bool:
+    """Accept only references that contain real source metadata/content."""
+    title = str(item.get("title") or "").strip()
+    url = str(item.get("url") or "").strip()
+    description = str(item.get("description") or "").strip()
+    markdown = str(item.get("markdown") or "").strip()
+
+    if not title or title.lower() in {"untitled", "error", "unauthorized", "forbidden"}:
+        return False
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+
+    combined = f"{title} {description} {markdown}".lower()
+    error_patterns = (
+        r"\b401\b",
+        r"\b403\b",
+        r"\b404\b",
+        r"\b429\b",
+        r"unauthorized",
+        r"forbidden",
+        r"access denied",
+        r"failed to fetch",
+        r"request failed",
+        r"error fetching",
+        r"unable to access",
+    )
+    if any(re.search(pattern, combined) for pattern in error_patterns):
+        return False
+
+    # Require at least a small amount of actual descriptive/extracted content so
+    # a bare error page or empty shell is not counted as a research reference.
+    usable_text = f"{description} {markdown}".strip()
+    return len(usable_text) >= 40
+
+
+def _usable_research_results(results: list[dict], limit: int = 2) -> list[dict]:
+    selected: list[dict] = []
+    seen_urls: set[str] = set()
+    for item in results:
+        if not _is_usable_research_result(item):
+            continue
+        url = str(item.get("url") or "").strip().rstrip("/")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 @router.post("/v1/projects/{project_id}/research", response_model=ResearchResult)
 async def research_only(
     project_id: str,
@@ -62,14 +117,21 @@ async def research_only(
     search = FirecrawlWebSearch()
     result = await search.execute(
         query=payload.query.strip(),
-        num_results=2,
+        num_results=4,
         lang="en",
         country=payload.country,
     )
     if result.error:
         raise HTTPException(status_code=502, detail=result.error)
 
-    return ResearchResult(query=result.query, results=result.results[:2])
+    usable_results = _usable_research_results(result.results, limit=2)
+    if not usable_results:
+        raise HTTPException(
+            status_code=502,
+            detail="Firecrawl returned no usable research references. Please try a more specific query.",
+        )
+
+    return ResearchResult(query=result.query, results=usable_results)
 
 
 def _research_planner_llm() -> LLM:
@@ -110,8 +172,12 @@ async def synthesize_research(
 ) -> ResearchSynthesisResult:
     await _require_project_member(session, project_id, user)
 
+    usable_results = _usable_research_results(payload.results, limit=2)
+    if not usable_results:
+        raise HTTPException(status_code=400, detail="No usable research references were supplied.")
+
     compact_results = []
-    for item in payload.results[:2]:
+    for item in usable_results:
         compact_results.append(
             {
                 "title": str(item.get("title") or "Untitled")[:300],
