@@ -25,6 +25,7 @@ from platform_core.settings import settings
 from platform_core.usage import check_quota
 from platform_core.extra_api import router as extra_router
 from platform_core.tenant_api import router as tenant_router
+from platform_core.research_api import router as research_router
 
 
 @asynccontextmanager
@@ -50,6 +51,7 @@ app.add_middleware(
 app.include_router(app_builder_router)
 app.include_router(extra_router)
 app.include_router(tenant_router)
+app.include_router(research_router)
 
 
 @app.middleware("http")
