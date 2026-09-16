@@ -42,12 +42,32 @@ async def _builder_cancel_requested(run_id: str) -> bool:
         return bool(run and run.cancel_requested)
 
 
-async def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str) -> str:
+async def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str, role: str) -> str:
     execution = asyncio.create_task(agent.run(prompt))
+    last_step = -1
     while not execution.done():
         try:
-            return await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)
+            await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)
+            break
         except asyncio.TimeoutError:
+            current_step = int(getattr(agent, "current_step", 0))
+            if current_step != last_step:
+                last_step = current_step
+                async with SessionLocal() as session:
+                    run = await session.get(WorkflowRun, run_id)
+                    if run is not None and run.status == "builder_running":
+                        run.heartbeat_at = datetime.now(timezone.utc)
+                        await add_workflow_event(
+                            session,
+                            run_id,
+                            "builder.agent_progress",
+                            {
+                                "step": current_step,
+                                "max_steps": int(getattr(agent, "max_steps", 0)),
+                                "role": role,
+                            },
+                        )
+                        await session.commit()
             if await _builder_cancel_requested(run_id):
                 execution.cancel()
                 try:
@@ -332,7 +352,7 @@ async def process_builder_run(run_id: str) -> None:
                 before_input = int(getattr(agent.llm, "total_input_tokens", 0))
                 before_output = int(getattr(agent.llm, "total_completion_tokens", 0))
                 try:
-                    result = await _run_builder_agent_with_cancellation(agent, enriched, run_id)
+                    result = await _run_builder_agent_with_cancellation(agent, enriched, run_id, role)
                     completed = True
                 except _BuilderCancellationRequested:
                     cancelled = True

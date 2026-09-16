@@ -193,6 +193,28 @@ async def get_app_builder_run(
     return WorkflowRunDetailResponse.model_validate(run)
 
 
+@router.get("/v1/app-builder/runs/{run_id}/activity")
+async def get_app_builder_activity(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    run = await session.get(WorkflowRun, run_id)
+    if run is None or not run.status.startswith("builder_"):
+        raise HTTPException(status_code=404, detail="App Builder run not found")
+    await project_access(session, run.project_id, user, "viewer")
+    rows = await session.scalars(
+        select(WorkflowEvent)
+        .where(WorkflowEvent.workflow_run_id == run.id)
+        .order_by(WorkflowEvent.id.desc())
+        .limit(20)
+    )
+    return [
+        WorkflowEventResponse.model_validate(event).model_dump(mode="json")
+        for event in reversed(rows.all())
+    ]
+
+
 @router.get("/v1/app-builder/runs/{run_id}/preview")
 async def get_app_builder_preview(
     run_id: str,
