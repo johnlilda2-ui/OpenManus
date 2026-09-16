@@ -1,0 +1,85 @@
+name: One-time builder progress patch
+
+on:
+  push:
+    branches: [platform-core-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+          fetch-depth: 1
+
+      - name: Patch builder progress reporting
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Worker: publish internal agent step progress while an agent is running.
+          p = Path('platform_core/app_builder_worker.py')
+          s = p.read_text()
+          old = '''async def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str) -> str:\n    execution = asyncio.create_task(agent.run(prompt))\n    while not execution.done():\n        try:\n            return await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)\n        except asyncio.TimeoutError:\n            if await _builder_cancel_requested(run_id):\n                execution.cancel()\n                try:\n                    await execution\n                except asyncio.CancelledError:\n                    pass\n                raise _BuilderCancellationRequested\n    return await execution\n'''
+          new = '''async def _run_builder_agent_with_cancellation(agent, prompt: str, run_id: str, role: str) -> str:\n    execution = asyncio.create_task(agent.run(prompt))\n    last_step = -1\n    while not execution.done():\n        try:\n            await asyncio.wait_for(asyncio.shield(execution), timeout=1.0)\n            break\n        except asyncio.TimeoutError:\n            current_step = int(getattr(agent, "current_step", 0))\n            if current_step != last_step:\n                last_step = current_step\n                async with SessionLocal() as session:\n                    run = await session.get(WorkflowRun, run_id)\n                    if run is not None and run.status == "builder_running":\n                        run.heartbeat_at = datetime.now(timezone.utc)\n                        await add_workflow_event(\n                            session,\n                            run_id,\n                            "builder.agent_progress",\n                            {\n                                "step": current_step,\n                                "max_steps": int(getattr(agent, "max_steps", 0)),\n                                "role": role,\n                            },\n                        )\n                        await session.commit()\n            if await _builder_cancel_requested(run_id):\n                execution.cancel()\n                try:\n                    await execution\n                except asyncio.CancelledError:\n                    pass\n                raise _BuilderCancellationRequested\n    return await execution\n'''
+          if old not in s:
+              raise SystemExit('Expected builder cancellation helper not found')
+          s = s.replace(old, new, 1)
+          old = 'result = await _run_builder_agent_with_cancellation(agent, enriched, run_id)'
+          new = 'result = await _run_builder_agent_with_cancellation(agent, enriched, run_id, role)'
+          if old not in s:
+              raise SystemExit('Expected builder agent call not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # API: lightweight activity endpoint for authenticated frontend polling.
+          p = Path('platform_core/app_builder_api.py')
+          s = p.read_text()
+          marker = '@router.get("/v1/app-builder/runs/{run_id}/preview")\n'
+          insert = '''@router.get("/v1/app-builder/runs/{run_id}/activity")\nasync def get_app_builder_activity(\n    run_id: str,\n    user: User = Depends(get_current_user),\n    session: AsyncSession = Depends(get_db),\n) -> list[dict]:\n    run = await session.get(WorkflowRun, run_id)\n    if run is None or not run.status.startswith("builder_"):\n        raise HTTPException(status_code=404, detail="App Builder run not found")\n    await project_access(session, run.project_id, user, "viewer")\n    rows = await session.scalars(\n        select(WorkflowEvent)\n        .where(WorkflowEvent.workflow_run_id == run.id)\n        .order_by(WorkflowEvent.id.desc())\n        .limit(20)\n    )\n    return [\n        WorkflowEventResponse.model_validate(event).model_dump(mode="json")\n        for event in reversed(rows.all())\n    ]\n\n\n'''
+          if marker not in s:
+              raise SystemExit('Preview route marker not found')
+          s = s.replace(marker, insert + marker, 1)
+          p.write_text(s)
+
+          # Frontend: show explicit live internal agent activity and poll it separately.
+          p = Path('platform_core/static/index.html')
+          s = p.read_text()
+          s = s.replace('const state={token:localStorage.getItem(\'om_token\')||\'\',project:null,conversation:null,builderRun:null,poll:null,research:null};', 'const state={token:localStorage.getItem(\'om_token\')||\'\',project:null,conversation:null,builderRun:null,poll:null,research:null,builderActivity:null};', 1)
+          old = '<div id="builderResearchStatus" class="small muted" style="margin-top:8px"></div><div id="builderStatus" class="summary hidden"></div>'
+          new = '<div id="builderResearchStatus" class="small muted" style="margin-top:8px"></div><div id="builderLive" class="summary hidden" style="margin-top:8px"></div><div id="builderStatus" class="summary hidden"></div>'
+          if old not in s:
+              raise SystemExit('Builder live status HTML marker not found')
+          s = s.replace(old, new, 1)
+          old = 'function showStatus(run){$(\'builderStatus\').classList.remove(\'hidden\');const phases=currentBuilderMode()===\'app\'?appPhases:websitePhases;'
+          new = 'function showStatus(run){$(\'builderStatus\').classList.remove(\'hidden\');const phases=currentBuilderMode()===\'app\'?appPhases:websitePhases;'
+          if old not in s:
+              raise SystemExit('showStatus marker not found')
+          # Keep showStatus body intact; add dedicated live renderer before it.
+          live_fn = '''function showBuilderActivity(activity){if(!activity||!activity.length){$('builderLive').classList.add('hidden');return}const last=[...activity].reverse().find(x=>x.kind==='builder.agent_progress');const recent=activity.slice(-4).reverse();if(!last&&!recent.length){$('builderLive').classList.add('hidden');return}let html='<b>Live activity</b>';if(last?.payload){html+=`<div class="muted">Cataron is working through internal AI steps: ${Number(last.payload.step||0)+1} of ${Number(last.payload.max_steps||0)||'several'}.</div>`}const labels={"builder.started":"Build started","builder.step_started":"Phase started","builder.agent_progress":"AI work in progress","builder.cancel_requested":"Cancellation requested","builder.cancelled":"Build cancelled","approval.required":"Approval needed","builder.completed":"Build complete","builder.failed":"Build failed"};html+='<div class="small muted" style="margin-top:6px">'+recent.map(x=>`${esc(labels[x.kind]||x.kind)} · ${formatTime(x.created_at)}`).join('<br>')+'</div>';$('builderLive').classList.remove('hidden');$('builderLive').innerHTML=html}\nasync function refreshBuilderActivity(id){try{const events=await api('/v1/app-builder/runs/'+id+'/activity');state.builderActivity=events;showBuilderActivity(events)}catch{}}\n'''
+          s = s.replace('function showStatus(run){', live_fn + 'function showStatus(run){', 1)
+          old = 'await refreshBuilderPreview(active.id)}catch(e){$(\'builderRuns\').textContent=\'Build status unavailable: \'+e.message}}'
+          new = 'await Promise.all([refreshBuilderPreview(active.id),refreshBuilderActivity(active.id)])}catch(e){$(\'builderRuns\').textContent=\'Build status unavailable: \'+e.message}}'
+          if old not in s:
+              raise SystemExit('Builder refresh marker not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Remove this one-time workflow in the same commit so it cannot run again.
+          import subprocess
+          subprocess.run(['git','rm','.github/workflows/one-time-builder-progress.yml'],check=True)
+          PY
+
+      - name: Commit progress patch and remove one-time workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add platform_core/app_builder_worker.py platform_core/app_builder_api.py platform_core/static/index.html .github/workflows/one-time-builder-progress.yml
+          git diff --cached --check
+          git commit -m "fix: expose live builder progress in console"
+          git push origin platform-core-v1
