@@ -1,0 +1,41 @@
+name: One-off fix ToolCallAgent sandbox cleanup
+
+on:
+  push:
+    branches: [platform-core-v1]
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+          fetch-depth: 0
+
+      - name: Patch ToolCallAgent run cleanup behavior
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('app/agent/toolcall.py')
+          s = p.read_text()
+          old = '''    async def run(self, request: Optional[str] = None) -> str:\n        """Run the agent with cleanup when done."""\n        try:\n            return await super().run(request)\n        finally:\n            await self.cleanup()\n'''
+          new = '''    async def run(self, request: Optional[str] = None) -> str:\n        """Run the agent and clean up only when the agent owns its lifecycle."""\n        try:\n            return await super().run(request)\n        finally:\n            if self.cleanup_after_run:\n                await self.cleanup()\n'''
+          if old not in s:
+              raise SystemExit('ToolCallAgent.run cleanup block not found')
+          p.write_text(s.replace(old, new, 1))
+
+          Path('.github/workflows/one-off-fix-toolcall-cleanup.yml').unlink()
+
+      - name: Commit permanent patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/agent/toolcall.py
+          git rm -f .github/workflows/one-off-fix-toolcall-cleanup.yml || true
+          git commit -m "fix: keep sandbox alive until builder finalization"
+          git push origin platform-core-v1
