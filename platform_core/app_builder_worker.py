@@ -175,8 +175,10 @@ def _sandbox_package(agent, project_id: str) -> Path:
     from daytona import SessionExecuteRequest
 
     remote_root = f"/workspace/projects/{project_id}"
-    session_id = "app-builder-finalize"
-    agent.sandbox.process.create_session(session_id)
+    # Reuse the bootstrap process session created by PolicySandboxManus.create().
+    # Creating a second Daytona process session here can fail after the website
+    # has already been generated, turning a successful build into "Failed to create session".
+    session_id = "cataron-workspace-bootstrap"
     archive_path = "/tmp/application.zip"
     command = (
         "python -c \"import shutil; "
