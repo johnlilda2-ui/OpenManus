@@ -57,10 +57,8 @@ jobs:
               raise SystemExit('Builder live status HTML marker not found')
           s = s.replace(old, new, 1)
           old = 'function showStatus(run){$(\'builderStatus\').classList.remove(\'hidden\');const phases=currentBuilderMode()===\'app\'?appPhases:websitePhases;'
-          new = 'function showStatus(run){$(\'builderStatus\').classList.remove(\'hidden\');const phases=currentBuilderMode()===\'app\'?appPhases:websitePhases;'
           if old not in s:
               raise SystemExit('showStatus marker not found')
-          # Keep showStatus body intact; add dedicated live renderer before it.
           live_fn = '''function showBuilderActivity(activity){if(!activity||!activity.length){$('builderLive').classList.add('hidden');return}const last=[...activity].reverse().find(x=>x.kind==='builder.agent_progress');const recent=activity.slice(-4).reverse();if(!last&&!recent.length){$('builderLive').classList.add('hidden');return}let html='<b>Live activity</b>';if(last?.payload){html+=`<div class="muted">Cataron is working through internal AI steps: ${Number(last.payload.step||0)+1} of ${Number(last.payload.max_steps||0)||'several'}.</div>`}const labels={"builder.started":"Build started","builder.step_started":"Phase started","builder.agent_progress":"AI work in progress","builder.cancel_requested":"Cancellation requested","builder.cancelled":"Build cancelled","approval.required":"Approval needed","builder.completed":"Build complete","builder.failed":"Build failed"};html+='<div class="small muted" style="margin-top:6px">'+recent.map(x=>`${esc(labels[x.kind]||x.kind)} · ${formatTime(x.created_at)}`).join('<br>')+'</div>';$('builderLive').classList.remove('hidden');$('builderLive').innerHTML=html}\nasync function refreshBuilderActivity(id){try{const events=await api('/v1/app-builder/runs/'+id+'/activity');state.builderActivity=events;showBuilderActivity(events)}catch{}}\n'''
           s = s.replace('function showStatus(run){', live_fn + 'function showStatus(run){', 1)
           old = 'await refreshBuilderPreview(active.id)}catch(e){$(\'builderRuns\').textContent=\'Build status unavailable: \'+e.message}}'
@@ -79,7 +77,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add platform_core/app_builder_worker.py platform_core/app_builder_api.py platform_core/static/index.html .github/workflows/one-time-builder-progress.yml
+          git add -A
           git diff --cached --check
           git commit -m "fix: expose live builder progress in console"
           git push origin platform-core-v1
