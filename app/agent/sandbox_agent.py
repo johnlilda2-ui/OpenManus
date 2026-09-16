@@ -29,6 +29,7 @@ class SandboxManus(ToolCallAgent):
 
     max_observe: int = 10000
     max_steps: int = 20
+    cleanup_after_run: bool = False
 
     # MCP clients for remote tool access
     mcp_clients: MCPClients = Field(default_factory=MCPClients)

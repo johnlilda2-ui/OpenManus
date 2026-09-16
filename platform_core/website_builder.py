@@ -25,6 +25,39 @@ User requirements:
 {requirements}
 """.strip()
 
+    normalized = requirements.lower()
+    simple_static = (
+        "SIMPLE_STATIC_WEBSITE"
+        if (
+            "one-page" in normalized
+            and ("plain html" in normalized or "html/css/javascript" in normalized or "html/css/js" in normalized)
+            and not any(term in normalized for term in ("marketplace", "e-commerce", "ecommerce", "saas", "booking", "dashboard", "database", "authentication"))
+        )
+        else None
+    )
+    if simple_static:
+        return [
+            {
+                "name": "Build, preview and verify simple website",
+                "prompt": f"""{shared}
+
+This is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA pipeline. Build the requested one-page website directly in the project root using only plain HTML, CSS and JavaScript.
+
+Create exactly these files unless genuinely needed otherwise: index.html, styles.css, script.js. Make the page polished, responsive, accessible, and visually coherent. Implement the requested hero, About, three project cards, and contact section. Do not invent real people's identities, real client claims, or fake external project URLs. Use safe local placeholders for links.
+
+After creating the files, launch a simple local server INSIDE the Daytona sandbox with a persistent named session on port 8080 and the project directory as the document root. Verify it with curl. Then call the sandbox preview tool for port 8080 and capture its browser-accessible URL. Leave the preview running.
+
+Return exactly:
+PREVIEW_URL: <the real preview URL>
+WEBSITE_READY: true
+""",
+                "model_profile": "builder",
+                "role": "builder",
+                "max_attempts": 1,
+                "browser_required": False,
+            }
+        ]
+
     steps = [
         WebsiteStep(
             name="Reference research and design inspiration",

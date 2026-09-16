@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import tempfile
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -447,6 +448,11 @@ async def process_builder_run(run_id: str) -> None:
                         await session.commit()
                     return
                 if completed:
+                    preview_match = re.search(r"PREVIEW_URL\s*[:=]\s*(https?://[^\s)]+)", result or "", flags=re.IGNORECASE)
+                    async with SessionLocal() as session:
+                        if preview_match:
+                            await add_workflow_event(session, run_id, "builder.preview_ready", {"url": preview_match.group(1).rstrip(".,"), "step_index": step_index})
+                        await session.commit()
                     async with SessionLocal() as session:
                         run = await session.get(WorkflowRun, run_id)
                         await record_usage(

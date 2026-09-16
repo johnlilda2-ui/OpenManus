@@ -45,6 +45,7 @@ class BaseAgent(BaseModel, ABC):
 
     # Execution control
     max_steps: int = Field(default=10, description="Maximum steps before termination")
+    cleanup_after_run: bool = True
     current_step: int = Field(default=0, description="Current step in execution")
 
     duplicate_threshold: int = 2
@@ -135,7 +136,8 @@ class BaseAgent(BaseModel, ABC):
                 self.current_step = 0
                 self.state = AgentState.IDLE
                 results.append(f"Terminated: Reached max steps ({self.max_steps})")
-        await SANDBOX_CLIENT.cleanup()
+        if self.cleanup_after_run:
+            await SANDBOX_CLIENT.cleanup()
         return "\n".join(results) if results else "No steps executed"
 
     @abstractmethod
