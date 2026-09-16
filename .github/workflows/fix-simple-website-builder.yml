@@ -24,10 +24,10 @@ jobs:
           p = Path("app/agent/base.py")
           s = p.read_text()
           if "cleanup_after_run: bool = True" not in s:
-              marker = "    max_steps: int = 30\n"
+              marker = '    max_steps: int = Field(default=10, description="Maximum steps before termination")\n'
               if marker not in s:
-                  raise SystemExit("BaseAgent max_steps marker not found")
-              s = s.replace(marker, marker + "    # Sandbox-backed agents clean up explicitly after the whole workflow.\n    cleanup_after_run: bool = True\n", 1)
+                  raise SystemExit("BaseAgent max_steps field not found")
+              s = s.replace(marker, marker + "    cleanup_after_run: bool = True\n", 1)
           old = "        await SANDBOX_CLIENT.cleanup()\n        return \"\\n\".join(results) if results else \"No steps executed\"\n"
           new = "        if self.cleanup_after_run:\n            await SANDBOX_CLIENT.cleanup()\n        return \"\\n\".join(results) if results else \"No steps executed\"\n"
           if old not in s:
@@ -41,7 +41,7 @@ jobs:
           if "cleanup_after_run: bool = False" not in s:
               if marker not in s:
                   raise SystemExit("SandboxManus max_steps marker not found")
-              s = s.replace(marker, marker + "    # The platform worker owns sandbox lifetime for the complete builder run.\n    cleanup_after_run: bool = False\n", 1)
+              s = s.replace(marker, marker + "    cleanup_after_run: bool = False\n", 1)
           p.write_text(s)
 
           p = Path("platform_core/website_builder.py")
@@ -50,7 +50,7 @@ jobs:
           if "SIMPLE_STATIC_WEBSITE" not in s:
               if marker not in s:
                   raise SystemExit("website_builder steps marker not found")
-              fast = '''    normalized = requirements.lower()\n    simple_static = (\n        "SIMPLE_STATIC_WEBSITE"\n        if (\n            "one-page" in normalized\n            and ("plain html" in normalized or "html/css/javascript" in normalized or "html/css/js" in normalized)\n            and not any(term in normalized for term in ("marketplace", "e-commerce", "ecommerce", "saas", "booking", "dashboard", "database", "authentication"))\n        )\n        else None\n    )\n    if simple_static:\n        return [\n            {\n                "name": "Build, preview and verify simple website",\n                "prompt": f"""{shared}\n\nThis is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA pipeline. Build the requested one-page website directly in the project root using only plain HTML, CSS and JavaScript.\n\nCreate exactly these files unless genuinely needed otherwise:\n- index.html\n- styles.css\n- script.js\n\nUse original, realistic placeholder content where the user did not provide personal details. Make the page polished, responsive, accessible, and visually coherent. Implement the requested hero, About, three project cards, and contact section. Do not invent real people's identities, real client claims, or fake external project URLs. Use safe local placeholders for links.\n\nAfter creating the files, immediately launch a simple local server INSIDE the Daytona sandbox with a persistent named session, using port 8080 and the project directory as the document root. Verify it with curl. Then call the sandbox preview tool for port 8080 and capture its browser-accessible URL. Leave the preview server running.\n\nReturn a concise completion message containing exactly:\nPREVIEW_URL: <the real preview URL>\nWEBSITE_READY: true\n""",\n                "model_profile": "builder",\n                "role": "builder",\n                "max_attempts": 1,\n                "browser_required": False,\n            }\n        ]\n\n'''
+              fast = '''    normalized = requirements.lower()\n    simple_static = (\n        "SIMPLE_STATIC_WEBSITE"\n        if (\n            "one-page" in normalized\n            and ("plain html" in normalized or "html/css/javascript" in normalized or "html/css/js" in normalized)\n            and not any(term in normalized for term in ("marketplace", "e-commerce", "ecommerce", "saas", "booking", "dashboard", "database", "authentication"))\n        )\n        else None\n    )\n    if simple_static:\n        return [\n            {\n                "name": "Build, preview and verify simple website",\n                "prompt": f"""{shared}\n\nThis is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA pipeline. Build the requested one-page website directly in the project root using only plain HTML, CSS and JavaScript.\n\nCreate exactly these files unless genuinely needed otherwise: index.html, styles.css, script.js. Make the page polished, responsive, accessible, and visually coherent. Implement the requested hero, About, three project cards, and contact section. Do not invent real people's identities, real client claims, or fake external project URLs. Use safe local placeholders for links.\n\nAfter creating the files, launch a simple local server INSIDE the Daytona sandbox with a persistent named session on port 8080 and the project directory as the document root. Verify it with curl. Then call the sandbox preview tool for port 8080 and capture its browser-accessible URL. Leave the preview running.\n\nReturn exactly:\nPREVIEW_URL: <the real preview URL>\nWEBSITE_READY: true\n""",\n                "model_profile": "builder",\n                "role": "builder",\n                "max_attempts": 1,\n                "browser_required": False,\n            }\n        ]\n\n'''
               s = s.replace(marker, fast + marker, 1)
           p.write_text(s)
 
@@ -58,7 +58,7 @@ jobs:
           s = p.read_text()
           if "builder.preview_ready" not in s:
               old = '                if completed:\n                    async with SessionLocal() as session:\n'
-              new = '''                if completed:\n                    preview_match = re.search(r"PREVIEW_URL\\s*[:=]\\s*(https?://[^\\s)]+)", result or "", flags=re.IGNORECASE)\n                    async with SessionLocal() as session:\n                        if preview_match:\n                            await add_workflow_event(\n                                session,\n                                run_id,\n                                "builder.preview_ready",\n                                {"url": preview_match.group(1).rstrip(".,"), "step_index": step_index},\n                            )\n                        await session.commit()\n                    async with SessionLocal() as session:\n'''
+              new = '''                if completed:\n                    preview_match = re.search(r"PREVIEW_URL\\s*[:=]\\s*(https?://[^\\s)]+)", result or "", flags=re.IGNORECASE)\n                    async with SessionLocal() as session:\n                        if preview_match:\n                            await add_workflow_event(session, run_id, "builder.preview_ready", {"url": preview_match.group(1).rstrip(".,"), "step_index": step_index})\n                        await session.commit()\n                    async with SessionLocal() as session:\n'''
               if old not in s:
                   raise SystemExit("builder completed block not found")
               s = s.replace(old, new, 1)
