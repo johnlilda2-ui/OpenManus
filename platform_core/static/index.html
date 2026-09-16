@@ -48,7 +48,41 @@ const websitePhases=['Research and plan','Design system','Build pages and conten
 function formatTime(v){if(!v)return'—';try{return new Date(v).toLocaleString()}catch{return String(v)}}
 function showBuilderActivity(activity){if(!activity||!activity.length){$('builderLive').classList.add('hidden');return}const last=[...activity].reverse().find(x=>x.kind==='builder.agent_progress');const recent=activity.slice(-4).reverse();if(!last&&!recent.length){$('builderLive').classList.add('hidden');return}let html='<b>Live activity</b>';if(last?.payload){html+=`<div class="muted">Cataron is working through internal AI steps: ${Number(last.payload.step||0)+1} of ${Number(last.payload.max_steps||0)||'several'}.</div>`}const labels={"builder.started":"Build started","builder.step_started":"Phase started","builder.agent_progress":"AI work in progress","builder.cancel_requested":"Cancellation requested","builder.cancelled":"Build cancelled","approval.required":"Approval needed","builder.completed":"Build complete","builder.failed":"Build failed"};html+='<div class="small muted" style="margin-top:6px">'+recent.map(x=>`${esc(labels[x.kind]||x.kind)} · ${formatTime(x.created_at)}`).join('<br>')+'</div>';$('builderLive').classList.remove('hidden');$('builderLive').innerHTML=html}
 async function refreshBuilderActivity(id){try{const events=await api('/v1/app-builder/runs/'+id+'/activity');state.builderActivity=events;showBuilderActivity(events)}catch{}}
-function showStatus(run){$('builderStatus').classList.remove('hidden');const phases=currentBuilderMode()==='app'?appPhases:websitePhases;const step=Math.max(0,Number(run.current_step||0));let title='Cataron is building',detail='Cataron is working automatically.',pct=Math.min(100,Math.round(step/phases.length*100));if(run.status==='builder_queued'){title='Waiting for Cataron to start';detail='Your build is safely queued.';pct=0}else if(run.status==='builder_running'){detail=`Working on phase ${Math.min(step+1,phases.length)} of ${phases.length}.`}else if(run.status==='builder_awaiting_approval'){title='Approval needed';detail='Cataron is waiting for an approval.'}else if(run.status==='builder_completed'){title='Build complete';detail='Cataron finished the build.';pct=100}else if(run.status==='builder_cancelled'){title='Build cancelled';detail='This build was stopped.'}else if(run.status==='builder_failed'){title='Build failed';detail=run.error||'An error occurred.'} $('builderStatus').innerHTML=`<b>${esc(title)}</b><div class="muted">${esc(detail)}</div><div class="progress"><div style="width:${pct}%"></div></div>${phases.map((p,i)=>`<div class="phase ${i<step?'done':''} ${run.status==='builder_running'&&i===step?'current':''} ${run.status==='builder_failed'&&i===step?'fail':''}">${i<step?'✓':i===step&&run.status==='builder_running'?'▶':'○'} ${esc(p)}</div>`).join('')}${run.error?`<div class="err small" style="margin-top:8px">${esc(run.error)}</div>`:''}`}
+function builderActivityMessage(event){
+const p=event?.payload||{};
+const name=String(p.name||'').toLowerCase();
+const role=String(p.role||'').toLowerCase();
+if(event?.kind==='builder.completed')return 'Cataron finished the website.';
+if(event?.kind==='builder.failed')return 'Cataron hit an issue while building.';
+if(event?.kind==='builder.cancelled')return 'Cataron stopped the build.';
+if(event?.kind==='approval.required')return 'Cataron needs your approval before continuing.';
+if(event?.kind==='builder.cancel_requested')return 'Cataron is stopping the current work.';
+if(event?.kind==='builder.step_started'){
+  if(role==='fixer'||name.includes('repair')||name.includes('fix'))return 'Cataron found an issue and is fixing it.';
+  if(role==='reviewer'||name.includes('review')||name.includes('verification')||name.includes('verify'))return 'Cataron is checking the website.';
+  if(role==='designer'||name.includes('design')||name.includes('visual'))return 'Cataron is designing the website.';
+  if(role==='tester'||name.includes('test')||name.includes('qa'))return 'Cataron is testing the website.';
+  if(name.includes('preview')||name.includes('run and preview'))return 'Cataron is preparing the live preview.';
+  if(role==='planner'||name.includes('research')||name.includes('plan'))return 'Cataron is planning the website.';
+  return 'Cataron is building the website.';
+}
+if(event?.kind==='builder.agent_progress')return role==='fixer'?'Cataron is fixing an issue.':role==='designer'?'Cataron is designing the website.':role==='tester'?'Cataron is testing the website.':role==='reviewer'?'Cataron is checking the website.':'Cataron is building the website.';
+return null;
+}
+function showStatus(run){
+$('builderStatus').classList.remove('hidden');
+let title='Cataron is building',detail='Cataron is working automatically.',pct=0;
+if(run.status==='builder_queued'){title='Waiting for Cataron to start';detail='Your build is safely queued.';}
+else if(run.status==='builder_running'){detail='Cataron is working on your website.';}
+else if(run.status==='builder_awaiting_approval'){title='Approval needed';detail='Cataron is waiting for an approval.';}
+else if(run.status==='builder_completed'){title='Build complete';detail='Cataron finished the build.';pct=100;}
+else if(run.status==='builder_cancelled'){title='Build cancelled';detail='This build was stopped.';}
+else if(run.status==='builder_failed'){title='Build failed';detail=run.error||'An error occurred.';}
+const activity=state.builderActivity||[];
+const current=[...activity].reverse().map(builderActivityMessage).find(Boolean);
+if(run.status==='builder_running'&&current)detail=current;
+$('builderStatus').innerHTML=`<b>${esc(title)}</b><div class="muted">${esc(detail)}</div><div class="progress"><div style="width:${pct}%"></div></div>`;
+}
 async function refreshBuilderRuns(){if(!state.project)return;try{const runs=await api('/v1/projects/'+state.project+'/app-builder/runs');if(!runs.length){$('builderRuns').textContent='No builds yet.';return}const active=runs.find(r=>r.id===state.builderRun)||runs[0];state.builderRun=active.id;showStatus(active);$('builderRuns').innerHTML=runs.slice(0,5).map(r=>`<div class="summary"><span class="badge">${esc(r.status)}</span><div>${esc(r.input||'')}</div><div class="small muted">${formatTime(r.created_at)}</div><div class="row" style="margin-top:6px"><button onclick="watchBuilder('${r.id}')">View status</button>${['builder_queued','builder_running','builder_awaiting_approval'].includes(r.status)?`<button onclick="cancelBuilder('${r.id}')">Cancel</button>`:''}</div></div>`).join('');await Promise.all([refreshBuilderPreview(active.id),refreshBuilderActivity(active.id)])}catch(e){$('builderRuns').textContent='Build status unavailable: '+e.message}}
 async function refreshBuilderPreview(id){try{const p=await api('/v1/app-builder/runs/'+id+'/preview');$('builderPreview').innerHTML=p.url?`<b>Live preview is ready.</b><br><a href="${esc(p.url)}" target="_blank" rel="noopener">Open live preview ↗</a>`:'No live preview yet. Cataron will show it here when ready.'}catch{$('builderPreview').textContent='Preview status unavailable.'}}
 async function startBuilder(){if(!state.project){alert('Select a project first.');return}const req=$('builderRequirements').value.trim();if(req.length<20){alert('Please describe the project in at least 20 characters.');return}const mode=currentBuilderMode();const endpoint=mode==='website'?'/v1/projects/'+state.project+'/website-builder':'/v1/projects/'+state.project+'/app-builder';const researchReady=mode==='website'&&Boolean(state.research?.synthesis);const body={requirements:req,name:$('builderName').value.trim()||(mode==='website'?'AI Website Builder':'AI App Builder'),mode};if(researchReady){body.research_synthesis=state.research.synthesis;body.research_references=state.research.results.slice(0,2)}try{const d=await api(endpoint,{method:'POST',body});state.builderRun=d.run_id;$('builderResearchStatus').innerHTML=researchReady?'<span class="ok">✓ Research synthesis attached to Website Builder.</span>':'';await refreshBuilderRuns();if(state.poll)clearInterval(state.poll);state.poll=setInterval(()=>refreshBuilderRuns(),3000)}catch(e){alert('The build could not be started. '+e.message)}}
