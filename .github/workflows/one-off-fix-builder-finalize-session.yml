@@ -1,0 +1,47 @@
+name: One-off builder finalize session repair
+
+on:
+  push:
+    branches:
+      - platform-core-v1
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout platform-core-v1
+        uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+          fetch-depth: 0
+
+      - name: Patch builder finalization session reuse
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("platform_core/app_builder_worker.py")
+          text = path.read_text()
+          old = '''def _sandbox_package(agent, project_id: str) -> Path:\n    from daytona import SessionExecuteRequest\n\n    remote_root = f"/workspace/projects/{project_id}"\n    session_id = "app-builder-finalize"\n    agent.sandbox.process.create_session(session_id)\n    archive_path = "/tmp/application.zip"\n'''
+          new = '''def _sandbox_package(agent, project_id: str) -> Path:\n    from daytona import SessionExecuteRequest\n\n    remote_root = f"/workspace/projects/{project_id}"\n    # Reuse the bootstrap process session created by PolicySandboxManus.create().\n    # Creating a second Daytona process session here can fail after the website\n    # has already been generated, turning a successful build into "Failed to create session".\n    session_id = "cataron-workspace-bootstrap"\n    archive_path = "/tmp/application.zip"\n'''
+          if old not in text:
+              raise SystemExit("Expected finalize-session block was not found; aborting")
+          path.write_text(text.replace(old, new, 1))
+          print("Patched platform_core/app_builder_worker.py")
+          PY
+
+      - name: Verify exact patch
+        run: |
+          grep -n -A9 -B2 'def _sandbox_package' platform_core/app_builder_worker.py
+          ! grep -n 'app-builder-finalize' platform_core/app_builder_worker.py
+
+      - name: Commit repair and remove one-off workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add platform_core/app_builder_worker.py .github/workflows/one-off-fix-builder-finalize-session.yml
+          git commit -m "fix: reuse sandbox bootstrap session during builder finalization"
+          git push origin HEAD:platform-core-v1
