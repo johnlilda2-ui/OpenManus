@@ -1,7 +1,8 @@
 name: One-time simple website builder optimization
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [platform-core-v1]
 
 jobs:
   patch:
@@ -20,7 +21,6 @@ jobs:
           from pathlib import Path
           import re
 
-          # 1) Keep Daytona sandbox alive across multiple agent.run() calls.
           p = Path("app/agent/base.py")
           s = p.read_text()
           if "cleanup_after_run: bool = True" not in s:
@@ -44,7 +44,6 @@ jobs:
               s = s.replace(marker, marker + "    # The platform worker owns sandbox lifetime for the complete builder run.\n    cleanup_after_run: bool = False\n", 1)
           p.write_text(s)
 
-          # 2) For a genuinely simple one-page static request, use one focused builder step.
           p = Path("platform_core/website_builder.py")
           s = p.read_text()
           marker = "    steps = [\n"
@@ -55,7 +54,6 @@ jobs:
               s = s.replace(marker, fast + marker, 1)
           p.write_text(s)
 
-          # 3) Make the builder UI understand a preview URL returned by the fast path immediately.
           p = Path("platform_core/app_builder_worker.py")
           s = p.read_text()
           if "builder.preview_ready" not in s:
@@ -64,19 +62,10 @@ jobs:
               if old not in s:
                   raise SystemExit("builder completed block not found")
               s = s.replace(old, new, 1)
-              # Add regex import.
               if "import re\n" not in s:
                   s = s.replace("import os\n", "import os\nimport re\n", 1)
           p.write_text(s)
 
-          # 4) Expose preview-ready events through the existing activity endpoint; the UI can show the link without waiting for artifact packaging.
-          p = Path("platform_core/app_builder_api.py")
-          s = p.read_text()
-          if "builder.preview_ready" not in s:
-              raise SystemExit("preview event patch expected in worker")
-          p.write_text(s)
-
-          # Remove this workflow after applying the permanent patch.
           Path(".github/workflows/fix-simple-website-builder.yml").unlink()
 
       - name: Commit permanent patch
