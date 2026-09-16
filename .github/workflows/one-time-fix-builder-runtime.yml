@@ -23,11 +23,16 @@ jobs:
           from pathlib import Path
           p = Path('platform_core/static/index.html')
           s = p.read_text()
-          old = "function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'})}"
-          new = "function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[m]))}"
-          if old not in s:
-              raise SystemExit('Expected broken esc helper was not found; aborting without changes.')
-          p.write_text(s.replace(old, new, 1))
+          marker = "function esc(s){"
+          start = s.find(marker)
+          if start < 0:
+              raise SystemExit('esc helper not found; aborting without changes.')
+          end = s.find('\n', start)
+          if end < 0:
+              end = len(s)
+          fixed = "function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[m]))}"
+          s = s[:start] + fixed + s[end:]
+          p.write_text(s)
           PY
 
       - name: Commit login fix
