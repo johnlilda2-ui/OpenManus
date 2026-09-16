@@ -1,0 +1,38 @@
+name: Fix login JavaScript
+
+on:
+  push:
+    branches:
+      - platform-core-v1
+
+permissions:
+  contents: write
+
+jobs:
+  fix-login-js:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: platform-core-v1
+          fetch-depth: 1
+      - name: Fix broken esc helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('platform_core/static/index.html')
+          s = p.read_text()
+          old = "function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'})}"
+          new = "function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[m]))}"
+          if old not in s:
+              raise SystemExit('Expected broken esc helper was not found; no change made.')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit and push fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add platform_core/static/index.html
+          git commit -m "fix: repair login frontend JavaScript"
+          git push origin platform-core-v1
