@@ -9,7 +9,7 @@ from platform_core.settings import settings
 
 
 def _normalize_region(region: str | None) -> str | None:
-    """Accept AWS region IDs and provider dashboard labels such as 'Western Europe WEUR'."""
+    """Normalize a standard AWS/S3 region value."""
     if not region:
         return None
     value = region.strip()
@@ -18,6 +18,14 @@ def _normalize_region(region: str | None) -> str | None:
     if " " in value:
         value = value.split()[-1]
     return value.lower()
+
+
+def _s3_region(endpoint_url: str | None, configured_region: str | None) -> str | None:
+    """Cloudflare R2 uses the S3 API region 'auto', regardless of bucket location."""
+    endpoint = (endpoint_url or "").strip().lower()
+    if "r2.cloudflarestorage.com" in endpoint:
+        return "auto"
+    return _normalize_region(configured_region)
 
 
 class ArtifactStorage:
@@ -30,7 +38,10 @@ class ArtifactStorage:
             self.s3 = boto3.client(
                 "s3",
                 endpoint_url=settings.s3_endpoint_url or None,
-                region_name=_normalize_region(settings.s3_region),
+                region_name=_s3_region(
+                    settings.s3_endpoint_url,
+                    settings.s3_region,
+                ),
             )
 
     def _local_path(self, storage_key: str) -> Path:
