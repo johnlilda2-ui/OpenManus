@@ -299,6 +299,24 @@ async def process_builder_run(run_id: str) -> None:
                     step_name=spec["name"],
                     prompt=spec["prompt"],
                 )
+                # A worker restart can occur after the step work commits but before
+                # run.current_step is advanced. Never execute an already-completed
+                # builder phase a second time.
+                if step.status == "completed":
+                    run.current_step = step_index + 1
+                    run.output = step.result or run.output
+                    run.heartbeat_at = datetime.now(timezone.utc)
+                    await add_workflow_event(
+                        session,
+                        run_id,
+                        "builder.step_already_completed",
+                        {
+                            "step_index": step_index,
+                            "next_step": run.current_step,
+                        },
+                    )
+                    await session.commit()
+                    continue
                 prompt = render_step_prompt(
                     spec["prompt"],
                     input_text=run.input,
@@ -342,6 +360,8 @@ async def process_builder_run(run_id: str) -> None:
                         "builder.step_started",
                         {
                             "step_index": step_index,
+                            "phase": step_index + 1,
+                            "total_phases": len(workflow.steps_json),
                             "name": spec["name"],
                             "attempt": attempt,
                             "role": role,
@@ -517,9 +537,23 @@ async def process_builder_run(run_id: str) -> None:
 
             async with SessionLocal() as session:
                 run = await session.get(WorkflowRun, run_id)
+                step = await session.scalar(
+                    select(WorkflowStepRun).where(
+                        WorkflowStepRun.workflow_run_id == run_id,
+                        WorkflowStepRun.step_index == step_index,
+                    )
+                )
+                if run is None:
+                    return
+                now = datetime.now(timezone.utc)
+                if step is not None:
+                    step.status = "completed"
+                    step.result = result[:50000]
+                    step.error = None
+                    step.completed_at = now
                 run.output = result
                 run.current_step = step_index + 1
-                run.heartbeat_at = datetime.now(timezone.utc)
+                run.heartbeat_at = now
                 await add_workflow_event(session, run_id, "builder.step_completed", {"step_index": step_index, "next_step": run.current_step, "result": result[:10000]})
                 await session.commit()
 
