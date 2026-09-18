@@ -84,15 +84,18 @@ async def current_usage(session: AsyncSession, project_id: str) -> dict[str, int
 
 
 async def check_quota(session: AsyncSession, project_id: str, prompt: str) -> tuple[bool, str, ProjectQuota]:
+    """
+    Enforce only the active-concurrency safety guard.
+
+    Monthly token and monthly task values remain available for reporting and
+    future billing/analytics, but they no longer block execution. This keeps
+    the self-hosted platform from rejecting builds because a monthly allowance
+    was exhausted.
+    """
     quota = await get_or_create_quota(session, project_id)
     usage = await current_usage(session, project_id)
-    estimated = estimate_tokens(prompt)
-    if usage["tasks"] >= quota.monthly_task_limit:
-        return False, "monthly task quota exceeded", quota
-    if usage["concurrent"] >= quota.max_concurrent_tasks:
+    if quota.max_concurrent_tasks > 0 and usage["concurrent"] >= quota.max_concurrent_tasks:
         return False, "maximum concurrent task limit reached", quota
-    if usage["tokens"] + estimated >= quota.monthly_token_limit:
-        return False, "monthly token quota exceeded", quota
     return True, "ok", quota
 
 
