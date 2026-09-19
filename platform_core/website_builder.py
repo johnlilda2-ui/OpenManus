@@ -41,11 +41,11 @@ User requirements:
                 "name": "Build, preview and verify simple website",
                 "prompt": f"""{shared}
 
-This is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA pipeline. Build the requested one-page website directly in the project root using only plain HTML, CSS and JavaScript.
+This is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA pipeline. Finish this request in a maximum of 4 internal AI work cycles. Build the requested one-page website directly in the project root using only plain HTML, CSS and JavaScript.
 
 Create exactly these files unless genuinely needed otherwise: index.html, styles.css, script.js. Make the page polished, responsive, accessible, and visually coherent. Implement the requested hero, About, three project cards, and contact section. Do not invent real people's identities, real client claims, or fake external project URLs. Use safe local placeholders for links.
 
-After creating the files, launch a simple local server INSIDE the Daytona sandbox on port 8081 with the project directory as the document root. Do not use port 8080: Daytona already runs an internal FastAPI/static service on that port. Start the site with a persistent named session, verify it with curl against 127.0.0.1:8081, then call the sandbox preview tool for port 8081 and capture its browser-accessible URL. Leave the preview running.
+After creating the files, launch a simple local server INSIDE the Daytona sandbox on port 8081 with the project directory as the document root. Do not use port 8080: Daytona already runs an internal FastAPI/static service on that port. Use one persistent server command, verify the three files with curl, then call the sandbox preview tool for port 8081 and capture its browser-accessible URL. Do not spend extra cycles on research, refactoring, or optional QA. Leave the preview running.
 
 Use these exact checks:
 - cd to {workspace}
@@ -62,6 +62,7 @@ WEBSITE_READY: true
                 "model_profile": "builder",
                 "role": "builder",
                 "max_attempts": 1,
+                "max_agent_steps": 4,
                 "browser_required": False,
             }
         ]
