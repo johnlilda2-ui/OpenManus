@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import os
@@ -27,6 +28,7 @@ from platform_core.policy import PolicyToolBroker, ToolApprovalRequired, ToolPol
 from platform_core.queue import enqueue_app_builder
 from platform_core.settings import settings
 from platform_core.usage import record_usage
+from platform_core.website_builder import build_simple_static_files
 from platform_core.workflows import get_or_create_step_run, render_step_prompt
 from platform_core.worker import PolicyManus
 
@@ -119,6 +121,101 @@ def _reset_agent(agent, role: str, model_profile: str | None, max_steps_override
     agent.current_step = 0
     agent.max_steps = int(max_steps_override if max_steps_override is not None else _builder_agent_step_budget(role))
     agent.memory = Memory()
+
+
+async def _run_deterministic_static_build(
+    agent,
+    run_id: str,
+    project_id: str,
+    requirements: str,
+) -> str:
+    """Build the narrow one-page HTML/CSS/JS path without spending LLM cycles."""
+    from app.daytona.sandbox import SessionExecuteRequest
+
+    if await _builder_cancel_requested(run_id):
+        raise _BuilderCancellationRequested
+
+    files = build_simple_static_files(requirements)
+    remote_root = f"/workspace/projects/{project_id}"
+    session_id = "cataron-workspace-bootstrap"
+    progress = (
+        ("files", "Generating the website files"),
+        ("server", "Starting the live preview server"),
+        ("verify", "Verifying the generated page"),
+    )
+
+    for key, message in progress:
+        async with SessionLocal() as session:
+            await add_workflow_event(
+                session,
+                run_id,
+                "builder.fast_path_progress",
+                {"stage": key, "message": message},
+            )
+            await session.commit()
+
+        if await _builder_cancel_requested(run_id):
+            raise _BuilderCancellationRequested
+
+        if key == "files":
+            for filename, content in files.items():
+                encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+                command = (
+                    "python -c \"import base64; "
+                    f"open('{remote_root}/{filename}','wb').write(base64.b64decode('{encoded}'))\""
+                )
+                response = agent.sandbox.process.execute_session_command(
+                    session_id,
+                    SessionExecuteRequest(command=command, run_async=False, cwd=remote_root),
+                    timeout=30,
+                )
+                if getattr(response, "exit_code", 1) not in {0, None}:
+                    raise RuntimeError(f"Failed to write {filename} in the sandbox")
+
+        elif key == "server":
+            command = (
+                "python -m http.server 8081 --bind 0.0.0.0 "
+                f">/tmp/cataron-preview.log 2>&1 & echo $!"
+            )
+            response = agent.sandbox.process.execute_session_command(
+                session_id,
+                SessionExecuteRequest(command=command, run_async=False, cwd=remote_root),
+                timeout=30,
+            )
+            if getattr(response, "exit_code", 1) not in {0, None}:
+                raise RuntimeError("Failed to start the preview server on port 8081")
+
+        elif key == "verify":
+            checks = (
+                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/ >/dev/null && "
+                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/styles.css >/dev/null && "
+                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/script.js >/dev/null"
+            )
+            response = agent.sandbox.process.execute_session_command(
+                session_id,
+                SessionExecuteRequest(command=checks, run_async=False, cwd=remote_root),
+                timeout=30,
+            )
+            if getattr(response, "exit_code", 1) not in {0, None}:
+                raise RuntimeError("Generated website failed the local preview checks")
+
+            from app.tool.sandbox.sb_preview_tool import SandboxPreviewTool
+
+            preview_result = await SandboxPreviewTool.create_with_sandbox(agent.sandbox).execute(port=8081)
+            if preview_result.error:
+                raise RuntimeError(preview_result.error)
+            preview_data = preview_result.output or {}
+            preview_url = str(preview_data.get("url") or "").strip()
+            if not preview_url:
+                raise RuntimeError("Daytona did not return a preview URL")
+
+            return (
+                f"PREVIEW_URL: {preview_url}\n"
+                "WEBSITE_READY: true\n"
+                "BUILD_MODE: deterministic_static\n"
+            )
+
+    raise RuntimeError("Deterministic static build did not reach verification")
 
 
 async def claim_builder_run(run_id: str | None = None) -> str | None:
@@ -323,7 +420,11 @@ async def process_builder_run(run_id: str) -> None:
                     previous_output=run.output or "",
                     step_index=step_index,
                 )
-                enriched = await _enriched_prompt(session, run, prompt)
+                enriched = (
+                    prompt
+                    if spec.get("execution_mode") == "deterministic_static"
+                    else await _enriched_prompt(session, run, prompt)
+                )
                 await session.commit()
 
             agent = await _create_agent(policy, role, model_profile, approved_tools) if agent is None else agent
@@ -376,7 +477,15 @@ async def process_builder_run(run_id: str) -> None:
                 before_input = int(getattr(agent.llm, "total_input_tokens", 0))
                 before_output = int(getattr(agent.llm, "total_completion_tokens", 0))
                 try:
-                    result = await _run_builder_agent_with_cancellation(agent, enriched, run_id, role)
+                    if spec.get("execution_mode") == "deterministic_static":
+                        result = await _run_deterministic_static_build(
+                            agent,
+                            run_id,
+                            run.project_id,
+                            run.input,
+                        )
+                    else:
+                        result = await _run_builder_agent_with_cancellation(agent, enriched, run_id, role)
                     completed = True
                 except _BuilderCancellationRequested:
                     cancelled = True
