@@ -63,6 +63,7 @@ WEBSITE_READY: true
                 "role": "builder",
                 "max_attempts": 1,
                 "max_agent_steps": 4,
+                "execution_mode": "deterministic_static",
                 "browser_required": False,
             }
         ]
