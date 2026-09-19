@@ -12,6 +12,221 @@ class WebsiteStep:
     browser_required: bool = False
 
 
+def build_simple_static_files(requirements: str) -> dict[str, str]:
+    """Return a polished, dependency-free one-page site for the fast static path."""
+    return {
+        "index.html": """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A clean, modern personal portfolio website.">
+  <title>Personal Portfolio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav container" aria-label="Primary">
+      <a class="brand" href="#home">Portfolio</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+      <div class="nav-links" id="nav-links">
+        <a href="#about">About</a>
+        <a href="#projects">Projects</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section id="home" class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Personal Portfolio</p>
+          <h1>Build work that is simple, useful, and memorable.</h1>
+          <p class="hero-text">A clean starting point for presenting your work, your story, and the next project you want people to discover.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#projects">View projects</a>
+            <a class="button secondary" href="#contact">Get in touch</a>
+          </div>
+        </div>
+        <div class="hero-card" aria-hidden="true">
+          <span class="orb orb-one"></span>
+          <span class="orb orb-two"></span>
+          <div class="hero-card-inner">
+            <span class="hero-card-label">Selected work</span>
+            <strong>Thoughtful digital experiences</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="about" class="section">
+      <div class="container two-col">
+        <div>
+          <p class="eyebrow">About</p>
+          <h2>A clear introduction without the clutter.</h2>
+        </div>
+        <div class="section-copy">
+          <p>Use this section to introduce yourself, explain what you do, and describe the kind of work you enjoy.</p>
+          <p>Replace this placeholder text with your own background, skills, interests, or professional story.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="projects" class="section section-alt">
+      <div class="container">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Projects</p>
+            <h2>Selected work</h2>
+          </div>
+          <p>Three flexible cards ready for your real projects.</p>
+        </div>
+        <div class="project-grid">
+          <article class="project-card">
+            <div class="project-number">01</div>
+            <h3>Project One</h3>
+            <p>Add a short description of the problem, your approach, and the result.</p>
+            <a href="#contact" aria-label="Discuss Project One">Discuss project →</a>
+          </article>
+          <article class="project-card">
+            <div class="project-number">02</div>
+            <h3>Project Two</h3>
+            <p>Highlight the idea, technology, design decision, or lesson that made this work meaningful.</p>
+            <a href="#contact" aria-label="Discuss Project Two">Discuss project →</a>
+          </article>
+          <article class="project-card">
+            <div class="project-number">03</div>
+            <h3>Project Three</h3>
+            <p>Replace this copy with accurate project details, outcomes, and links you control.</p>
+            <a href="#contact" aria-label="Discuss Project Three">Discuss project →</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="section contact-section">
+      <div class="container contact-card">
+        <div>
+          <p class="eyebrow">Contact</p>
+          <h2>Have a project in mind?</h2>
+          <p>Use the form to create a simple contact experience, then connect it to your preferred email or backend later.</p>
+        </div>
+        <form id="contact-form" class="contact-form">
+          <label for="name">Name</label>
+          <input id="name" name="name" autocomplete="name" placeholder="Your name" required>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" placeholder="your-email@example.com" required>
+          <label for="message">Message</label>
+          <textarea id="message" name="message" rows="5" placeholder="Tell me a little about the project." required></textarea>
+          <button class="button primary" type="submit">Send message</button>
+          <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span>© <span id="year"></span> Portfolio</span>
+      <a href="#home">Back to top ↑</a>
+    </div>
+  </footer>
+  <script src="script.js"></script>
+</body>
+</html>
+""",
+        "styles.css": """*{box-sizing:border-box}
+:root{--bg:#0b1020;--surface:#121a2c;--surface-2:#18233a;--text:#f5f7fb;--muted:#aab4c8;--accent:#7c9cff;--accent-2:#9d7cff;--line:rgba(255,255,255,.1);--max:1120px}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,var(--bg),#0e1527 45%,#0b1020);color:var(--text);line-height:1.6}
+a{color:inherit;text-decoration:none}
+.container{width:min(100% - 40px,var(--max));margin-inline:auto}
+.site-header{position:sticky;top:0;z-index:20;background:rgba(11,16,32,.78);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.nav{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.brand{font-weight:800;letter-spacing:.02em}
+.nav-links{display:flex;gap:24px}
+.nav-links a{color:var(--muted);transition:color .2s ease}
+.nav-links a:hover,.nav-links a:focus-visible{color:var(--text)}
+.nav-toggle{display:none;background:none;border:1px solid var(--line);color:var(--text);border-radius:999px;padding:8px 13px}
+.hero{padding:96px 0 88px}
+.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}
+.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:.75rem;color:var(--accent);font-weight:800;margin:0 0 12px}
+h1,h2,h3{line-height:1.1;margin:0 0 18px}
+h1{font-size:clamp(3rem,7vw,5.8rem);max-width:10ch}
+h2{font-size:clamp(2rem,4vw,3.25rem)}
+h3{font-size:1.45rem}
+.hero-text,.section-copy p,.section-heading>p,.contact-card p{color:var(--muted);max-width:62ch}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.button{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:14px;padding:12px 18px;font-weight:750;cursor:pointer}
+.button.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));border-color:transparent;color:#0a0d18}
+.button.secondary{background:rgba(255,255,255,.04)}
+.hero-card{min-height:420px;border:1px solid var(--line);border-radius:32px;position:relative;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(124,156,255,.3),transparent 34%),radial-gradient(circle at 75% 75%,rgba(157,124,255,.25),transparent 30%),var(--surface)}
+.hero-card-inner{position:absolute;inset:auto 24px 24px;padding:22px;border:1px solid var(--line);border-radius:24px;background:rgba(11,16,32,.72);backdrop-filter:blur(10px)}
+.hero-card-label{display:block;color:var(--muted);font-size:.85rem;margin-bottom:8px}
+.hero-card-inner strong{font-size:1.3rem}
+.orb{position:absolute;width:170px;height:170px;border-radius:50%;filter:blur(2px);opacity:.65}
+.orb-one{top:58px;right:70px;background:linear-gradient(135deg,var(--accent),transparent)}
+.orb-two{bottom:120px;left:70px;background:linear-gradient(135deg,var(--accent-2),transparent)}
+.section{padding:100px 0}
+.section-alt{background:rgba(255,255,255,.025);border-block:1px solid var(--line)}
+.two-col{display:grid;grid-template-columns:.85fr 1.15fr;gap:56px}
+.section-copy{padding-top:10px}
+.section-heading{display:flex;justify-content:space-between;gap:40px;align-items:end;margin-bottom:34px}
+.project-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.project-card{min-height:290px;padding:26px;border:1px solid var(--line);border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015));display:flex;flex-direction:column}
+.project-number{color:var(--accent);font-size:.8rem;font-weight:800;letter-spacing:.12em;margin-bottom:auto}
+.project-card p{color:var(--muted);margin-bottom:28px}
+.project-card a{color:var(--text);font-weight:700}
+.contact-section{padding-top:72px}
+.contact-card{display:grid;grid-template-columns:.95fr 1.05fr;gap:48px;padding:34px;border:1px solid var(--line);border-radius:28px;background:var(--surface)}
+.contact-form{display:grid;gap:10px}
+.contact-form label{font-size:.9rem;font-weight:700}
+.contact-form input,.contact-form textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:13px 14px;background:#0c1324;color:var(--text);font:inherit;outline:none}
+.contact-form input:focus,.contact-form textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(124,156,255,.12)}
+.form-status{min-height:1.4em;margin:0!important}
+.site-footer{border-top:1px solid var(--line);padding:24px 0;color:var(--muted)}
+.footer-inner{display:flex;justify-content:space-between;gap:16px}
+@media (max-width:820px){
+  .nav-toggle{display:block}
+  .nav-links{display:none;position:absolute;left:20px;right:20px;top:64px;padding:14px;border:1px solid var(--line);border-radius:18px;background:#0e1628;flex-direction:column}
+  .nav-links.open{display:flex}
+  .hero{padding-top:72px}.hero-grid,.two-col,.contact-card{grid-template-columns:1fr}
+  .project-grid{grid-template-columns:1fr}
+  .section-heading{display:block}
+  .hero-card{min-height:320px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nav-links a,.button{transition:none}}
+""",
+        "script.js": """const toggle=document.querySelector('.nav-toggle');
+const links=document.querySelector('#nav-links');
+const form=document.querySelector('#contact-form');
+const status=document.querySelector('#form-status');
+const year=document.querySelector('#year');
+
+if(year) year.textContent=new Date().getFullYear();
+
+toggle?.addEventListener('click',()=>{
+  const open=links.classList.toggle('open');
+  toggle.setAttribute('aria-expanded',String(open));
+});
+
+links?.querySelectorAll('a').forEach(link=>{
+  link.addEventListener('click',()=>{
+    links.classList.remove('open');
+    toggle?.setAttribute('aria-expanded','false');
+  });
+});
+
+form?.addEventListener('submit',event=>{
+  event.preventDefault();
+  status.textContent='Thanks — the form is ready to connect to your preferred email or backend.';
+  form.reset();
+});
+""",
+    }
+
+
 def build_website_builder_steps(project_id: str, requirements: str) -> list[dict]:
     workspace = f"workspace/projects/{project_id}"
     shared = f"""
