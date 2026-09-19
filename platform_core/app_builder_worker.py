@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 import os
 import re
@@ -204,7 +205,11 @@ async def _run_deterministic_static_build(
             preview_result = await SandboxPreviewTool.create_with_sandbox(agent.sandbox).execute(port=8081)
             if preview_result.error:
                 raise RuntimeError(preview_result.error)
-            preview_data = preview_result.output or {}
+            preview_data = (
+                json.loads(preview_result.output)
+                if isinstance(preview_result.output, str)
+                else (preview_result.output or {})
+            )
             preview_url = str(preview_data.get("url") or "").strip()
             if not preview_url:
                 raise RuntimeError("Daytona did not return a preview URL")
