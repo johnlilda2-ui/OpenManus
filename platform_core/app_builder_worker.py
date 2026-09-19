@@ -227,22 +227,18 @@ async def _run_deterministic_static_build(
                 raise RuntimeError("Failed to start the preview server on port 8081")
 
         elif key == "verify":
-            # Verify from inside the sandbox with Python's stdlib HTTP client.
-            # This avoids curl/proxy differences and retries briefly while the
-            # background server finishes binding to port 8081.
+            # Retry briefly while the background server finishes binding to 8081.
+            # The final diagnostic includes the server log when a check fails.
             checks = (
-                "python -c \"import time,urllib.request,sys; "
-                "urls=['http://127.0.0.1:8081/','http://127.0.0.1:8081/styles.css','http://127.0.0.1:8081/script.js']; "
-                "last=None; "
-                "for i in range(20): "
-                "  try: "
-                "    [urllib.request.urlopen(u, timeout=2).read(1) for u in urls]; "
-                "    sys.exit(0) "
-                "  except Exception as e: "
-                "    last=e; time.sleep(0.5) "
-                "print('preview check failed:', repr(last)); "
-                "print(open('/tmp/cataron-preview.log',errors='replace').read()[-4000:] if __import__('os').path.exists('/tmp/cataron-preview.log') else 'no preview log'); "
-                "sys.exit(1)\""
+                "for i in $(seq 1 20); do "
+                "python -c \"import urllib.request; "
+                "[urllib.request.urlopen(u, timeout=2).read(1) for u in "
+                "['http://127.0.0.1:8081/','http://127.0.0.1:8081/styles.css','http://127.0.0.1:8081/script.js']]\" "
+                "&& exit 0; sleep 0.5; "
+                "done; "
+                "echo 'PREVIEW_SERVER_LOG:'; "
+                "cat /tmp/cataron-preview.log 2>/dev/null || true; "
+                "exit 1"
             )
             response = agent.sandbox.process.execute_session_command(
                 session_id,
