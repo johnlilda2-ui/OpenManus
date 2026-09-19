@@ -245,6 +245,7 @@ User requirements:
         "SIMPLE_STATIC_WEBSITE"
         if (
             "one-page" in normalized
+            and "portfolio" in normalized
             and ("plain html" in normalized or "html/css/javascript" in normalized or "html/css/js" in normalized)
             and not any(term in normalized for term in ("marketplace", "e-commerce", "ecommerce", "saas", "booking", "dashboard", "database", "authentication"))
         )
