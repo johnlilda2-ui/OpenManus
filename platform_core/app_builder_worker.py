@@ -213,14 +213,17 @@ async def _run_deterministic_static_build(
                     raise RuntimeError(f"Failed to write {filename} in the sandbox")
 
         elif key == "server":
+            # Daytona can keep a synchronous session command open when a
+            # background process is launched through shell redirection. Use
+            # the SDK's native async execution instead so the request returns
+            # immediately while the server remains alive in the sandbox.
             command = (
-                "pkill -f 'python -m http.server 8081' >/dev/null 2>&1 || true; "
-                "nohup python -m http.server 8081 --bind 0.0.0.0 "
-                ">/tmp/cataron-preview.log 2>&1 </dev/null & echo $!"
+                "python -m http.server 8081 --bind 0.0.0.0 "
+                ">/tmp/cataron-preview.log 2>&1"
             )
             response = agent.sandbox.process.execute_session_command(
                 session_id,
-                SessionExecuteRequest(command=command, run_async=False, cwd=remote_root),
+                SessionExecuteRequest(command=command, run_async=True, cwd=remote_root),
                 timeout=30,
             )
             if getattr(response, "exit_code", 1) not in {0, None}:
