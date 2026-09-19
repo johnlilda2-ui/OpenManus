@@ -154,7 +154,15 @@ async def _run_deterministic_static_build(
 
     files = build_simple_static_files(requirements)
     remote_root = f"/workspace/projects/{project_id}"
-    session_id = "cataron-workspace-bootstrap"
+    # Use a run-specific Daytona process session so a reused sandbox cannot
+    # inherit a stale working directory or server process from an older build.
+    session_id = f"cataron-builder-{run_id}"
+
+    try:
+        agent.sandbox.process.create_session(session_id)
+    except Exception:
+        # A concurrently retried build may already have created this session.
+        pass
 
     # The project directory may not exist in a fresh/reused Daytona sandbox.
     # Create it before using it as the command cwd; otherwise the first file
@@ -206,8 +214,9 @@ async def _run_deterministic_static_build(
 
         elif key == "server":
             command = (
-                "python -m http.server 8081 --bind 0.0.0.0 "
-                f">/tmp/cataron-preview.log 2>&1 & echo $!"
+                "pkill -f 'python -m http.server 8081' >/dev/null 2>&1 || true; "
+                "nohup python -m http.server 8081 --bind 0.0.0.0 "
+                ">/tmp/cataron-preview.log 2>&1 </dev/null & echo $!"
             )
             response = agent.sandbox.process.execute_session_command(
                 session_id,
@@ -218,10 +227,22 @@ async def _run_deterministic_static_build(
                 raise RuntimeError("Failed to start the preview server on port 8081")
 
         elif key == "verify":
+            # Verify from inside the sandbox with Python's stdlib HTTP client.
+            # This avoids curl/proxy differences and retries briefly while the
+            # background server finishes binding to port 8081.
             checks = (
-                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/ >/dev/null && "
-                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/styles.css >/dev/null && "
-                f"curl --noproxy '*' -fsS http://127.0.0.1:8081/script.js >/dev/null"
+                "python -c \"import time,urllib.request,sys; "
+                "urls=['http://127.0.0.1:8081/','http://127.0.0.1:8081/styles.css','http://127.0.0.1:8081/script.js']; "
+                "last=None; "
+                "for i in range(20): "
+                "  try: "
+                "    [urllib.request.urlopen(u, timeout=2).read(1) for u in urls]; "
+                "    sys.exit(0) "
+                "  except Exception as e: "
+                "    last=e; time.sleep(0.5) "
+                "print('preview check failed:', repr(last)); "
+                "print(open('/tmp/cataron-preview.log',errors='replace').read()[-4000:] if __import__('os').path.exists('/tmp/cataron-preview.log') else 'no preview log'); "
+                "sys.exit(1)\""
             )
             response = agent.sandbox.process.execute_session_command(
                 session_id,
@@ -229,7 +250,8 @@ async def _run_deterministic_static_build(
                 timeout=30,
             )
             if getattr(response, "exit_code", 1) not in {0, None}:
-                raise RuntimeError("Generated website failed the local preview checks")
+                output = getattr(response, "result", None) or getattr(response, "output", None) or ""
+                raise RuntimeError(f"Generated website failed the local preview checks: {output}")
 
             from app.tool.sandbox.sb_preview_tool import SandboxPreviewTool
 
