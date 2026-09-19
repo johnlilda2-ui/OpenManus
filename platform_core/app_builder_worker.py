@@ -155,6 +155,21 @@ async def _run_deterministic_static_build(
     files = build_simple_static_files(requirements)
     remote_root = f"/workspace/projects/{project_id}"
     session_id = "cataron-workspace-bootstrap"
+
+    # The project directory may not exist in a fresh/reused Daytona sandbox.
+    # Create it before using it as the command cwd; otherwise the first file
+    # write fails before Python can even execute.
+    bootstrap = agent.sandbox.process.execute_session_command(
+        session_id,
+        SessionExecuteRequest(
+            command=f"mkdir -p '{remote_root}'",
+            run_async=False,
+            cwd="/workspace",
+        ),
+        timeout=30,
+    )
+    if getattr(bootstrap, "exit_code", 1) not in {0, None}:
+        raise RuntimeError(f"Failed to create the sandbox project directory: {remote_root}")
     progress = (
         ("files", "Generating the website files"),
         ("server", "Starting the live preview server"),
