@@ -45,7 +45,15 @@ This is a SIMPLE_STATIC_WEBSITE request. Do not run the long research/design/QA 
 
 Create exactly these files unless genuinely needed otherwise: index.html, styles.css, script.js. Make the page polished, responsive, accessible, and visually coherent. Implement the requested hero, About, three project cards, and contact section. Do not invent real people's identities, real client claims, or fake external project URLs. Use safe local placeholders for links.
 
-After creating the files, launch a simple local server INSIDE the Daytona sandbox with a persistent named session on port 8080 and the project directory as the document root. Verify it with curl. Then call the sandbox preview tool for port 8080 and capture its browser-accessible URL. Leave the preview running.
+After creating the files, launch a simple local server INSIDE the Daytona sandbox on port 8081 with the project directory as the document root. Do not use port 8080: Daytona already runs an internal FastAPI/static service on that port. Start the site with a persistent named session, verify it with curl against 127.0.0.1:8081, then call the sandbox preview tool for port 8081 and capture its browser-accessible URL. Leave the preview running.
+
+Use these exact checks:
+- cd to {workspace}
+- python -m http.server 8081 --bind 0.0.0.0
+- curl --noproxy '*' -fsS http://127.0.0.1:8081/
+- curl --noproxy '*' -fsS http://127.0.0.1:8081/styles.css
+- curl --noproxy '*' -fsS http://127.0.0.1:8081/script.js
+- call sandbox_preview with port 8081
 
 Return exactly:
 PREVIEW_URL: <the real preview URL>
