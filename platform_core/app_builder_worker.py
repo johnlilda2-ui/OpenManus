@@ -113,11 +113,11 @@ def _builder_agent_step_budget(role: str) -> int:
     return int(os.getenv("OPENMANUS_BUILDER_AGENT_MAX_STEPS", budgets.get(role, 10)))
 
 
-def _reset_agent(agent, role: str, model_profile: str | None) -> None:
+def _reset_agent(agent, role: str, model_profile: str | None, max_steps_override: int | None = None) -> None:
     agent.llm = create_llm(role, model_profile)
     agent.state = AgentState.IDLE
     agent.current_step = 0
-    agent.max_steps = _builder_agent_step_budget(role)
+    agent.max_steps = int(max_steps_override if max_steps_override is not None else _builder_agent_step_budget(role))
     agent.memory = Memory()
 
 
@@ -327,7 +327,8 @@ async def process_builder_run(run_id: str) -> None:
                 await session.commit()
 
             agent = await _create_agent(policy, role, model_profile, approved_tools) if agent is None else agent
-            _reset_agent(agent, role, model_profile)
+            agent_max_steps = spec.get("max_agent_steps")
+            _reset_agent(agent, role, model_profile, int(agent_max_steps) if agent_max_steps is not None else None)
 
             completed = False
             blocked_by_approval = False
@@ -371,7 +372,7 @@ async def process_builder_run(run_id: str) -> None:
                     )
                     await session.commit()
 
-                _reset_agent(agent, role, model_profile)
+                _reset_agent(agent, role, model_profile, int(agent_max_steps) if agent_max_steps is not None else None)
                 before_input = int(getattr(agent.llm, "total_input_tokens", 0))
                 before_output = int(getattr(agent.llm, "total_completion_tokens", 0))
                 try:
