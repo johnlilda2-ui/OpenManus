@@ -124,6 +124,22 @@ def _reset_agent(agent, role: str, model_profile: str | None, max_steps_override
     agent.memory = Memory()
 
 
+
+def _is_simple_static_request(requirements: str) -> bool:
+    normalized = (requirements or "").lower().replace("—", "-").replace("–", "-")
+    one_page = "one-page" in normalized or "one page" in normalized
+    html_js = (
+        "plain html" in normalized
+        or "html/css/javascript" in normalized
+        or "html/css/js" in normalized
+        or ("html" in normalized and "css" in normalized and "javascript" in normalized)
+    )
+    excluded = (
+        "marketplace", "e-commerce", "ecommerce", "saas", "booking",
+        "dashboard", "database", "authentication", "multi-page", "multi page",
+    )
+    return one_page and html_js and not any(term in normalized for term in excluded)
+
 async def _run_deterministic_static_build(
     agent,
     run_id: str,
@@ -482,7 +498,8 @@ async def process_builder_run(run_id: str) -> None:
                 before_input = int(getattr(agent.llm, "total_input_tokens", 0))
                 before_output = int(getattr(agent.llm, "total_completion_tokens", 0))
                 try:
-                    if spec.get("execution_mode") == "deterministic_static":
+                    fast_static = _is_simple_static_request(run.input)
+                    if spec.get("execution_mode") == "deterministic_static" or fast_static:
                         result = await _run_deterministic_static_build(
                             agent,
                             run_id,
